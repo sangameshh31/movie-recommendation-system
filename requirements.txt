@@ -1,0 +1,27 @@
+# Core data
+numpy>=1.26,<2.3
+pandas>=2.2
+
+# ML
+scikit-learn>=1.5
+
+# Embeddings (pulls CPU torch)
+sentence-transformers>=3.0
+
+# Vector search
+qdrant-client>=1.12
+
+# Backend
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
+httpx>=0.27
+
+# Frontend
+streamlit>=1.38
+
+# Utilities
+requests>=2.31
+
+# Testing
+pytest>=8.0

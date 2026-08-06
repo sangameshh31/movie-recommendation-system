@@ -1,0 +1,24 @@
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.idea/
+.vscode/
+
+# Regenerated inside the Docker build (see Dockerfile RUN chain)
+data/
+models_cache/
+qdrant_storage/
+*.parquet
+*.zip
+
+# Secrets / local
+.env
+*.log
+.streamlit/secrets.toml

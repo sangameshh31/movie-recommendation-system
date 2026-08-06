@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Data & model artifacts
+data/
+models_cache/
+qdrant_storage/
+*.parquet
+*.zip
+
+# Env
+.env
+
+# Tooling
+.idea/
+.vscode/
+.pytest_cache/
+.mypy_cache/
+*.log
+
+# Streamlit
+.streamlit/secrets.toml
