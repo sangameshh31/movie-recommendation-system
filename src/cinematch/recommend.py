@@ -14,6 +14,7 @@ import pandas as pd
 
 from cinematch.config import SETTINGS
 from cinematch.data import load_processed
+from cinematch.details import DetailsService
 from cinematch.embeddings import embed_query
 from cinematch.explainer import explain
 from cinematch.feedback import FeedbackStore
@@ -30,6 +31,8 @@ class RecommenderService:
         self._itemcf: ItemBasedCF | None = None
         self._store: VectorStore | None = None
         self._content: ContentScorer | None = None
+        self._details: DetailsService | None = None
+        self._people: PeopleService | None = None
         self._popularity: dict[int, float] = {}
         self.movies: pd.DataFrame | None = None
         self.ratings: pd.DataFrame | None = None
@@ -88,6 +91,20 @@ class RecommenderService:
         if self._content is None:
             self.store  # ensure store + content built
         return self._content
+
+    @property
+    def details(self) -> DetailsService:
+        if self._details is None:
+            self._details = DetailsService(self.movies)
+        return self._details
+
+    @property
+    def people(self) -> PeopleService:
+        if self._people is None:
+            from cinematch.people import PeopleService
+
+            self._people = PeopleService(self.movies)
+        return self._people
 
     @property
     def vector_index_ready(self) -> bool:
@@ -161,8 +178,25 @@ class RecommenderService:
             for r in merged.itertuples(index=False)
         ]
 
-    def liked_movies(self, user_id: int, limit: int = 5) -> list[dict]:
-        return self.user_ratings(user_id, min_rating=4.0)[:limit]
+    def liked_movies(self, user_id: int, limit: int = 8) -> list[dict]:
+        """Movies the user clearly liked: MovieLens 4+ ratings merged with
+        real-time ``like`` signals from the feedback store."""
+        merged: dict[int, dict] = {}
+        for m in self.user_ratings(user_id, min_rating=4.0):
+            merged[m["movie_id"]] = m
+        for mid in self.feedback.liked(user_id):
+            row = self.movies[self.movies["movie_id"] == mid]
+            if row.empty:
+                continue
+            r = row.iloc[0]
+            merged[mid] = {
+                "movie_id": int(r.movie_id),
+                "title": r.title,
+                "rating": 5.0,
+                "genres": list(r.genres),
+                "year": None if pd.isna(r.year) else int(r.year),
+            }
+        return list(merged.values())[:limit]
 
     # -- retrieval -----------------------------------------------------------------
 
@@ -239,7 +273,9 @@ class RecommenderService:
         """
         cfg = self.settings.retrieval
         n = n or cfg.n_recs
-        exclude = {m["movie_id"] for m in self.user_ratings(user_id)}
+        exclude = {
+            m["movie_id"] for m in self.user_ratings(user_id)
+        } | self.feedback.liked(user_id) | self.feedback.watched(user_id) | self.feedback.disliked(user_id)
 
         cf = self._cf_candidates(user_id, exclude)
         vec = self._build_content_vector(user_id, query)
@@ -294,13 +330,24 @@ class RecommenderService:
         language: str | None = None,
     ) -> list[dict]:
         """Natural-language vector search over the movie catalog."""
+        if not query or not query.strip():
+            return []
+        return self.semantic_search_vector(embed_query(query.strip()), n, origin, language)
+
+    def semantic_search_vector(
+        self,
+        vector: np.ndarray,
+        n: int = 10,
+        origin: str | None = None,
+        language: str | None = None,
+    ) -> list[dict]:
+        """Search the catalog by an already-embedded query vector."""
         if not self.vector_index_ready:
             raise RuntimeError(
                 "Vector index is not built. Run `python scripts/index_vectors.py` first."
             )
-        vec = embed_query(query.strip())
         hits = self.store.search(
-            vec, top_k=n, origin=origin or None, language=language or None
+            vector, top_k=n, origin=origin or None, language=language or None
         )
         return [
             {
@@ -367,6 +414,69 @@ class RecommenderService:
 
     # -- output ----------------------------------------------------------------------
 
+    def similar_movies(self, movie_id: int, n: int = 10) -> list[dict]:
+        """Movies close to ``movie_id`` in the vector space (fallback: genre)."""
+        exclude = {movie_id}
+        if self.vector_index_ready:
+            try:
+                vec = self.content.profile_vector([movie_id])
+                hits = self.content.candidates(vec, top_k=n + 1, exclude_ids=exclude)
+                return [
+                    payload
+                    for payload in (self.get_movie(int(h["movie_id"])) for h in hits[:n])
+                    if payload is not None
+                ]
+            except Exception:
+                pass
+        row = self.movies[self.movies["movie_id"] == movie_id]
+        genres = list(row.iloc[0]["genres"]) if not row.empty else []
+        if genres:
+            return [
+                m for m in self.trending(n=n, genre=genres[0]) if m["movie_id"] != movie_id
+            ][:n]
+        return []
+
+    def surprise(self, user_id: int) -> dict | None:
+        """A single personalized pick with an element of randomness.
+
+        Pulls a wide content candidate pool from the user's taste profile and
+        draws one randomly (preferring higher similarity), so re-rolls keep
+        surfacing fresh options instead of the same top-10 list. Users without
+        history get a popularity-weighted random pick.
+        """
+        liked = [m["movie_id"] for m in self.liked_movies(user_id)]
+        exclude = self.feedback.watched(user_id) | self.feedback.disliked(user_id)
+        pool: list[tuple[int, float]] = []
+        if liked and self.vector_index_ready:
+            try:
+                vec = self.content.profile_vector(liked[:8])
+                hits = self.content.candidates(
+                    vec, top_k=80, exclude_ids=exclude or None
+                )
+                pool = [(int(h["movie_id"]), float(h["score"])) for h in hits]
+            except Exception:
+                pool = []
+        if not pool:
+            pool = [
+                (mid, self._popularity.get(mid, 0.0))
+                for mid in self._popularity
+                if mid not in exclude
+            ][:100]
+
+        if not pool:
+            return None
+        scores = np.asarray([s for _, s in pool], dtype=float)
+        # Softmax-ish weights so high-sim titles dominate but any pick is possible.
+        weights = np.exp((scores - scores.max()) / max(scores.std(), 1e-6))
+        weights /= weights.sum()
+        chosen = pool[int(np.random.choice(len(pool), p=weights))]
+        mid = int(chosen[0])
+        movie = self.get_movie(mid)
+        if movie is None:
+            return None
+        movie["why"] = explain(movie, self.liked_movies(user_id))
+        return movie
+
     def _finalize(
         self,
         movie_ids: list[int],
@@ -376,8 +486,57 @@ class RecommenderService:
     ) -> list[dict]:
         movies = self.get_movies(movie_ids)
         liked = self.liked_movies(user_id) if with_explanations else []
+        because_of = self._because_of(movie_ids, [m["movie_id"] for m in liked])
         for m in movies:
             m["score"] = round(scores.get(m["movie_id"], 0.0), 4)
             if with_explanations:
                 m["why"] = explain(m, liked)
+                m["because_of"] = because_of.get(m["movie_id"], [])
         return movies
+
+    def _because_of(
+        self, movie_ids: list[int], liked_ids: list[int]
+    ) -> dict[int, list[dict]]:
+        """Map each candidate movie to the liked titles it's most similar to.
+
+        Uses raw vector similarity (cosine) so the caption can say e.g. "because
+        you liked Inception and Interstellar". Returns movie_id -> up to 2
+        ``{movie_id, title, similarity}`` entries.
+        """
+        if not liked_ids or not self.vector_index_ready:
+            return {}
+        try:
+            liked_vecs = self.store.retrieve_vectors(liked_ids)
+            cand_vecs = self.store.retrieve_vectors(movie_ids)
+        except Exception:
+            return {}
+        liked_titles = {
+            int(r.movie_id): str(r.title)
+            for r in self.movies[
+                self.movies["movie_id"].isin(liked_ids)
+            ].itertuples(index=False)
+        }
+        out: dict[int, list[dict]] = {}
+        for mid, vec in cand_vecs.items():
+            if mid not in movie_ids:
+                continue
+            sims = [
+                (
+                    like_id,
+                    float(np.dot(vec, like_vec))
+                    / (np.linalg.norm(vec) * np.linalg.norm(like_vec) or 1.0),
+                )
+                for like_id, like_vec in liked_vecs.items()
+                if like_id != mid
+            ]
+            sims.sort(key=lambda kv: kv[1], reverse=True)
+            out[mid] = [
+                {
+                    "movie_id": like_id,
+                    "title": liked_titles.get(like_id, ""),
+                    "similarity": float(round(sim, 3)),
+                }
+                for like_id, sim in sims[:2]
+                if liked_titles.get(like_id)
+            ]
+        return out

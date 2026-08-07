@@ -1,7 +1,7 @@
 # 📈 CineMatch AI — Progress Tracker
 
 > Keep this file updated as you complete each step. Mark with `[x]`.
-> Last updated: 07 Aug 2026 — **all core phases complete and verified on MovieLens 100k.**
+> Last updated: 07 Aug 2026 — **7 new features: account library, people pages, surprises, refinement, trailers, onboarding.**
 >
 > 📖 For exact commands + copy-paste AI prompts, see **`PROMPTS.md`** (the build playbook).
 
@@ -110,6 +110,9 @@
       then `python scripts/index_vectors.py --reset`) → richer embeddings
 - [ ] Scale up to MovieLens 1m / 25m (`MOVIELENS_SIZE=1m`)
 - [ ] Tune weights: `SVD_FACTORS`, `WEIGHT_CF`, `WEIGHT_CB`, `WEIGHT_POP`
+- [x] **7 new features** (account library, "Because you liked", people pages,
+      onboarding, conversational search refinement, trailers + external links,
+      Surprise me) — see Notes below
 
 ## Phase 8 — Metrics Targets
 
@@ -130,6 +133,58 @@
 
 **Changes made while completing the project (07 Aug 2026):**
 
+- **Seven new features (this batch):**
+  - **Persistent account library (`src/cinematch/feedback.py` + `GET /api/user/{id}/library`):**
+    the feedback store is no longer in-memory — likes, dislikes, watchlist,
+    **watched** and **star ratings** now persist to `data/feedback.json`
+    (thread-safe, atomic writes) and survive restarts. The Profile page shows
+    "Your library" rails (Liked / Watchlist / Watched / ⭐ Your ratings).
+  - **"Because you liked" (`recommend.py` `_because_of`):** every recommendation
+    now carries a `because_of` list (top-2 liked titles by raw vector cosine
+    similarity) shown as a caption under each card, e.g. "🎯 Because you liked:
+    Inception, The Matrix". Feedback likes now feed the content profile too
+    (`liked_movies()` merges MovieLens 4★ with live 👍 signals) and
+    rated/watched/liked titles are excluded from future recommendations.
+  - **Director & cast exploration (`src/cinematch/people.py` + `GET /api/people/search?q=`):**
+    TMDB person search + profile + combined credits (7-day cache in
+    `people_cache.parquet`), mapped back onto catalog titles. Director/Producer/
+    Writer chips and every cast card on the detail page are clickable
+    (`?person=Name`) and open a **People page** with photo, bio, and "in your
+    catalog" / "more from this person" rails; "← Back" returns to the movie.
+  - **Sign-up onboarding (Profile):** new accounts get a "Pick your favorites"
+    multi-select of 40 popular titles; saving marks them 👍 (seeding the taste
+    profile immediately).
+  - **Conversational search refinement (`POST /api/search/refine`):** after a
+    search, an expander lets you "➕ add more like X" and "➖ less of Y" — the
+    engine embeds each nudge and re-searches `seed + Σadd - Σremove` so results
+    shift toward/away from those concepts.
+  - **Trailers + external links (detail page):** TMDB `videos`/`homepage`/
+    `imdb_id` are fetched with the detail (`append_to_response=credits,videos`,
+    cache bumped to v2) and rendered as Trailer / Official site / IMDb / TMDB
+    buttons.
+  - **Surprise me (Home):** one-click personalized pick — content profile →
+    80 vector candidates → random draw weighted by similarity (popularity pool
+    for cold users), with 👍 / ➕ / "Roll again".
+  - Verified: all endpoints exercised, `pytest -q` → **9 passed**, AppTest
+    sweep over all 8 pages + every new feature → **0 exceptions**.
+
+- **Movie detail pages (`src/cinematch/details.py` + `/api/movies/{id}/details`):**
+  clicking any poster tile (or the "Details" button on result cards) now opens a
+  full IMDb-style detail view — synopsis, tagline, runtime, release date, status,
+  genre chips, **cast strip** (photos + characters), **Director / Producer / Writer**
+  credits, a TMDB rating and a "More like this" rail (vector neighbors, genre
+  fallback). Details are fetched **lazily from TMDB on first open** (`/movie|tv/{id}`
+  with `append_to_response=credits`, or `/search` by title+year for MovieLens rows
+  without a `tmdb_id`) and cached to `data/processed/details_cache.parquet`
+  (30-day TTL) so re-opens are instant. Every fetch is best-effort — failures fall
+  back to the local catalog. Tiles deep-link via `?detail=<id>` (URL shareable);
+  nav pills / "Back" close the view.
+- **Sign-in arranged like a real product:** the auth form moved out of the sidebar
+  into a centered **auth card on the Profile page** (sign in / create account in two
+  taps, guest status shown). The header now shows a compact **account pill**
+  ("🔐 Sign in" or "👤 name") that jumps to Profile; the sidebar shows a minimal
+  signed-in status with a sign-out button. Accounts live in `data/users.json`
+  (gitignored), no backend changes needed.
 - **Catalog scale-up to 9,561 titles (`scripts/fetch_catalog.py` v2 + `scripts/migrate_catalog.py`):**
   the catalog now covers **Hollywood + world cinema, Indian cinema (13 languages),
   anime, animation/cartoons and TV series**:

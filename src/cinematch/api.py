@@ -26,8 +26,21 @@ class FeedbackRequest(BaseModel):
     user_id: int
     movie_id: int
     action: str = Field(
-        ..., description="One of: like | dislike | watchlist | remove"
+        ...,
+        description="One of: like | dislike | watchlist | watched | rate | remove",
     )
+    value: float | None = Field(
+        None, ge=0.5, le=5.0, description="Star rating (0.5-5) when action='rate'"
+    )
+
+
+class RefineRequest(BaseModel):
+    seed: str = Field(..., min_length=1, description="Original search query")
+    additions: list[str] = Field(default_factory=list, max_length=5)
+    removals: list[str] = Field(default_factory=list, max_length=5)
+    n: int = Field(12, ge=1, le=50)
+    origin: str | None = None
+    language: str | None = None
 
 
 service: RecommenderService | None = None
@@ -173,10 +186,64 @@ def recommend_query(req: RecommendQueryRequest):
 
 @app.post("/api/feedback")
 def feedback(req: FeedbackRequest):
-    """Record a real-time user signal (like/dislike/watchlist/remove)."""
+    """Record a real-time user signal (like/dislike/watchlist/watched/rate)."""
     svc = _require_service()
-    svc.feedback.record(req.user_id, req.movie_id, req.action)
+    svc.feedback.record(req.user_id, req.movie_id, req.action, value=req.value)
     return {"status": "recorded", "user_id": req.user_id, "action": req.action}
+
+
+@app.post("/api/search/refine")
+def refine_search(req: RefineRequest):
+    """Conversational refinement: start from a seed query, then nudge the
+    vector with additional concepts (``+more like X``) and subtract others
+    (``-less of Y``) before re-searching the catalog."""
+    from cinematch.embeddings import embed_query
+
+    svc = _require_service()
+    vec = embed_query(req.seed.strip())
+    nudge = None
+    for phrase in req.additions:
+        if phrase.strip():
+            nudge = embed_query(phrase.strip()) if nudge is None else nudge + embed_query(phrase.strip())
+    for phrase in req.removals:
+        if phrase.strip():
+            nudge = -embed_query(phrase.strip()) if nudge is None else nudge - embed_query(phrase.strip())
+    if nudge is not None:
+        vec = vec + 0.6 * nudge
+    results = svc.semantic_search_vector(vec, n=req.n, origin=req.origin, language=req.language)
+    return {
+        "seed": req.seed,
+        "additions": req.additions,
+        "removals": req.removals,
+        "results": results,
+    }
+
+
+@app.get("/api/surprise")
+def surprise(user_id: int = Query(..., description="User id")):
+    """A single personalized pick with an element of randomness."""
+    svc = _require_service()
+    pick = svc.surprise(user_id)
+    if pick is None:
+        raise HTTPException(status_code=404, detail="No picks available")
+    return {"user_id": user_id, "pick": pick}
+
+
+@app.get("/api/people/search")
+def people_search(
+    q: str = Query(..., min_length=1, description="Director/actor name"),
+    n: int = Query(24, ge=1, le=50),
+):
+    """Resolve a person and their credits that exist in the catalog."""
+    from cinematch.people import PeopleService
+
+    svc = _require_service()
+    people = svc.people
+    person = people.search(q, svc.get_movie)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    person["catalog_movies"] = person["catalog_movies"][:n]
+    return person
 
 
 @app.get("/api/user/{user_id}/profile")
@@ -192,6 +259,24 @@ def user_profile(user_id: int, min_rating: float = Query(4.0)):
     }
 
 
+@app.get("/api/user/{user_id}/library")
+def user_library(user_id: int):
+    """The user's persistent account library (likes, stars, watchlist, watched)."""
+    svc = _require_service()
+    profile = svc.feedback.profile(user_id)
+    return {
+        "user_id": user_id,
+        "liked": svc.get_movies(profile["liked"]),
+        "disliked": svc.get_movies(profile["disliked"]),
+        "watchlist": svc.get_movies(profile["watchlist"]),
+        "watched": svc.get_movies(profile["watched"]),
+        "stars": {
+            str(mid): value
+            for mid, value in sorted(profile["stars"].items(), key=lambda kv: kv[1], reverse=True)
+        },
+    }
+
+
 @app.get("/api/movies/{movie_id}")
 def movie(movie_id: int):
     svc = _require_service()
@@ -199,6 +284,24 @@ def movie(movie_id: int):
     if item is None:
         raise HTTPException(status_code=404, detail="Movie not found")
     return item
+
+
+@app.get("/api/movies/{movie_id}/details")
+def movie_details(movie_id: int, similar: int = Query(10, ge=0, le=24)):
+    """Full detail (plot, cast, director, producer) plus similar titles."""
+    svc = _require_service()
+    item = svc.get_movie(movie_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    try:
+        details = svc.details.enrich(movie_id)
+    except Exception as exc:  # pragma: no cover
+        from cinematch.details import _empty_payload
+
+        print(f"Details enrichment failed for {movie_id}: {exc}")
+        details = _empty_payload("error")
+    similar_movies = svc.similar_movies(movie_id, n=similar) if similar else []
+    return {"movie": item, "details": details, "similar": similar_movies}
 
 
 @app.get("/api/explain/{user_id}/{movie_id}")

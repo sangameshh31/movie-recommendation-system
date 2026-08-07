@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -26,11 +26,21 @@ RUN pip install . && chmod +x start.sh
 
 # Bake the whole offline pipeline into the image at build time, so the
 # running container starts instantly with no network or large downloads.
-# The enriched processed catalog (with TMDB poster URLs) is copied in, then
-# the SVD model + semantic vector index are rebuilt inside the image.
-COPY data/processed/movies.parquet data/processed/ratings.parquet ./data/processed/
+# The enriched processed catalog (with TMDB poster URLs + overviews) is copied
+# in, then the SVD model + semantic vector index are rebuilt inside the image.
+COPY data/processed/movies.parquet \
+     data/processed/ratings.parquet \
+     data/processed/tmdb_catalog.parquet \
+     ./data/processed/
 RUN python scripts/train.py \
     && python scripts/index_vectors.py
+
+# Keep a read-only snapshot of the baked catalog so start.sh can seed a
+# persistent volume when DATA_DIR points at one (e.g. HF Spaces /data).
+COPY data/processed/movies.parquet \
+     data/processed/ratings.parquet \
+     data/processed/tmdb_catalog.parquet \
+     /opt/cinematch-processed/
 
 # Streamlit (proxied by Hugging Face Spaces on app_port) + internal FastAPI
 EXPOSE 7860 8000

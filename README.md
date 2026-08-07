@@ -26,7 +26,8 @@ Next-gen hybrid movie recommendation engine: **Collaborative Filtering (SVD + it
 
 - **Vector store:** Qdrant. Runs embedded (zero-setup, persisted in `qdrant_storage/`) by default; point `QDRANT_URL` at `http://localhost:6333` (Docker) for the server mode.
 - **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2` (384-dim).
-- **Feedback loop:** in-memory like/dislike/watchlist signals that re-rank on every request.
+- **Feedback loop:** per-account like/dislike/watchlist/watched/star signals
+  (persisted to `data/feedback.json`) that re-rank on every request.
 - **Indian cinema:** a TMDB-expanded catalog — **2,818 Indian films across 13 languages**
   (Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi, Gujarati,
   Assamese, Oriya, Urdu, Bhojpuri — incl. the full Dr. Rajkumar filmography).
@@ -36,6 +37,26 @@ Next-gen hybrid movie recommendation engine: **Collaborative Filtering (SVD + it
   search *"a Malayalam crime thriller"*, *"anime adventure"* or *"binge-worthy crime
   tv series"* — and browse trending titles per rail. Real TMDB poster art with
   gradient fallback.
+- **Movie detail pages:** click any poster to open a full IMDb-style view — plot
+  synopsis, tagline, runtime, genre chips, **cast strip**, **Director / Producer /
+  Writer** credits, TMDB rating and a **"More like this"** rail. Details are fetched
+  lazily from TMDB on first open and cached (`data/processed/details_cache.parquet`);
+  shareable URLs via `?detail=<id>`.
+- **Accounts:** sign in / create an account from a clean card on the **Profile** page
+  (header shows a "🔐 Sign in" / "👤 name" pill); likes, watchlist, **watched**,
+  **star ratings** and preferences persist per account (`data/users.json` + `data/feedback.json`).
+  New accounts get a **"Pick your favorites"** onboarding screen that seeds the taste profile.
+- **Because you liked:** every recommendation shows which of your liked titles it's
+  most similar to (raw vector similarity), e.g. "🎯 Because you liked: Inception, The Matrix".
+- **Director & cast exploration:** every cast card and Director/Producer/Writer chip on a
+  movie page is clickable — it opens a **People page** (photo, bio, their films in the catalog)
+  fetched from TMDB and cached (`data/processed/people_cache.parquet`).
+- **Trailers & external links:** movie pages fetch TMDB videos + homepage + IMDb id and
+  render Trailer / Official site / IMDb / TMDB buttons.
+- **Conversational search refinement:** after any search, use "➕ add more like X" /
+  "➖ less of Y" to nudge the results (vector additions/subtractions, `POST /api/search/refine`).
+- **Surprise me:** a one-click personalized pick on Home (weighted-random draw from your
+  taste profile) with 👍 / ➕ / "Roll again".
 
 ## Quickstart
 
@@ -74,12 +95,17 @@ streamlit run frontend/streamlit_app.py
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/recommend/{user_id}` | Hybrid recommendations for a user |
+| GET | `/api/recommend/{user_id}` | Hybrid recommendations for a user (with `because_of`) |
 | POST | `/api/recommend/query` | Hybrid recs blended with a natural-language query |
 | GET | `/api/movies/search?q=...` | Semantic / natural-language search (`origin`, `language` filters) |
 | GET | `/api/movies/trending?origin=indian` | Top movies by popularity (Indian cinema rail) |
-| POST | `/api/feedback` | Record `like` / `dislike` / `watchlist` / `remove` |
+| POST | `/api/feedback` | Record `like` / `dislike` / `watchlist` / `watched` / `rate` (with `value`) / `remove` |
 | GET | `/api/user/{user_id}/profile` | User's liked movies |
+| GET | `/api/user/{user_id}/library` | Persistent library: liked / watchlist / watched / star ratings |
+| GET | `/api/people/search?q=...` | Director/actor profile + their credits in the catalog |
+| POST | `/api/search/refine` | Conversational refinement (`seed` + `additions`/`removals` vectors) |
+| GET | `/api/surprise?user_id=...` | One random personalized pick |
+| GET | `/api/movies/{movie_id}/details` | Full detail (plot, cast, crew, trailer, links) + similar titles |
 | GET | `/api/explain/{user_id}/{movie_id}` | "Why you might like this" |
 
 ### LLM explanations (optional)

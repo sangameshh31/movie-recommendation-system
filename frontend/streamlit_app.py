@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from urllib.parse import quote
 
 import requests
 import streamlit as st
@@ -211,6 +212,67 @@ div[data-testid="stPills"] button[aria-checked="true"] {
 .cm-score { color: var(--muted); font-size: .8rem; }
 .cm-empty { text-align: center; color: var(--muted); padding: 3rem 0; font-size: 1.05rem; }
 
+/* ---- clickable tiles (whole card links to the detail page) ---- */
+a.cm-tile-link { display: block; text-decoration: none; color: inherit; }
+a.cm-tile-link:hover .cm-tile {
+  transform: translateY(-5px);
+  box-shadow: 0 12px 28px rgba(0,0,0,.55);
+  border-color: var(--accent);
+}
+.cm-tile-link .cm-tile:hover { border-color: var(--accent); }
+
+/* ---- movie detail page ---- */
+.cm-detail-hero {
+  display: flex; gap: 22px; align-items: stretch;
+  background: linear-gradient(110deg, #1c2430 0%, #131920 55%, #0f1217 100%);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 20px; margin: .5rem 0 1rem 0;
+  position: relative; overflow: hidden;
+}
+.cm-detail-hero .cm-bg {
+  position: absolute; inset: 0; background-size: cover; background-position: 60% 18%;
+  opacity: .25; filter: blur(2px);
+}
+.cm-detail-hero .cm-shade {
+  position: absolute; inset: 0;
+  background: linear-gradient(115deg, rgba(12,15,20,.97) 28%, rgba(12,15,20,.55) 62%, rgba(12,15,20,.85));
+}
+.cm-detail-poster { flex: 0 0 250px; position: relative; z-index: 1; }
+.cm-detail-poster img { width: 100%; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.65); }
+.cm-detail-body { position: relative; z-index: 1; padding: .2rem .4rem; min-width: 0; }
+.cm-detail-title { font-size: 2.3rem; font-weight: 800; color: #fff; line-height: 1.08; letter-spacing: -.5px; }
+.cm-detail-meta {
+  color: var(--muted); margin-top: .5rem; font-size: .95rem;
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+}
+.cm-detail-meta b { color: var(--accent); }
+.cm-tagline { color: #c6cfd9; font-style: italic; font-size: 1.05rem; margin-top: .7rem; }
+.cm-overview { color: #e6e9ee; font-size: 1rem; line-height: 1.6; margin-top: .6rem; max-width: 46rem; }
+.cm-crew { margin-top: 1rem; font-size: .92rem; color: var(--muted); }
+.cm-crew b { color: #fff; font-weight: 700; }
+.cm-crew .cm-chip { margin: 2px 4px 2px 0; }
+.cm-detail-rating { display: inline-flex; align-items: center; gap: 6px; }
+.cm-detail-rating .cm-hero-big { font-size: 1.15rem; }
+.cm-note { color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+
+/* ---- cast strip ---- */
+.cm-cast { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 12px 2px; }
+.cm-cast-card { flex: 0 0 112px; text-align: center; }
+.cm-cast-card img { width: 100%; height: 152px; object-fit: cover; border-radius: 8px; background: #0b0e12; }
+.cm-cast-name { font-size: .8rem; font-weight: 600; color: #fff; margin-top: 5px; line-height: 1.2; }
+.cm-cast-char { font-size: .72rem; color: var(--muted); margin-top: 2px; line-height: 1.2; }
+
+/* ---- auth card ---- */
+.cm-auth {
+  max-width: 440px; margin: 2.4rem auto;
+  background: linear-gradient(180deg, #1a212b, #141a21);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 1.9rem 1.7rem; text-align: center;
+}
+.cm-auth h3 { margin-bottom: .3rem; color: #fff; }
+.cm-auth p { color: var(--muted); font-size: .9rem; margin-bottom: 1.2rem; }
+.cm-auth .cm-auth-who { color: var(--muted); font-size: .95rem; margin: .9rem 0 1.1rem 0; }
+
 /* ---- inputs / buttons (IMDb form look) ---- */
 div[data-testid="stTextInput"] input, div[data-testid="stNumberInput"] input,
 div[data-baseweb="select"] > div, div[data-testid="stSlider"] [data-testid="stThumbValue"] {
@@ -248,7 +310,8 @@ div[data-testid="stTextInput"] input:focus { border-color: var(--accent); box-sh
 # Small helpers
 # ---------------------------------------------------------------------------
 
-USERS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "users.json")
+_DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
+USERS_FILE = os.path.join(_DATA_DIR, "users.json")
 
 
 def _load_users() -> dict[str, int]:
@@ -303,6 +366,7 @@ def _sign_up(username: str) -> bool:
     _save_users(users)
     st.session_state.user = {"username": name, "user_id": uid}
     st.session_state.user_id = uid
+    st.session_state["onboarding"] = True
     return True
 
 
@@ -337,6 +401,25 @@ def _type_tag(media_type: str | None) -> str:
     return ""
 
 
+def _chips(names: list[str]) -> str:
+    return "".join(f'<span class="cm-chip">{_escape(x)}</span>' for x in names)
+
+
+def _person_link(name: str) -> str:
+    """A clickable director/cast chip that deep-links to the person page."""
+    if not name:
+        return ""
+    href = f"?person={quote(str(name))}"
+    return (
+        f'<a class="cm-chip" href="{href}" '
+        f'title="Explore {_escape(name)} on TMDB">{_escape(name)}</a>'
+    )
+
+
+def _person_chips(names: list[str]) -> str:
+    return "".join(_person_link(n) for n in names)
+
+
 def _poster_img_html(movie: dict, width: int = 342) -> tuple[str, str]:
     """Return (img_html, fallback_html) for a poster (real image or gradient).
 
@@ -362,6 +445,7 @@ def _poster_img_html(movie: dict, width: int = 342) -> tuple[str, str]:
 
 
 def _tile_html(movie: dict) -> str:
+    mid = movie.get("movie_id")
     title = _escape(movie.get("clean_title") or movie.get("title") or "Untitled")
     year = movie.get("year")
     lang = movie.get("language")
@@ -369,7 +453,7 @@ def _tile_html(movie: dict) -> str:
     sub = f"{year}" if year else ""
     if lang:
         sub = f"{sub} · {_escape(lang)}" if sub else _escape(lang)
-    return (
+    tile = (
         f'<div class="cm-tile">'
         f'<div class="cm-poster">{img}{fallback}'
         f'{_badge_html(movie.get("vote_average"))}{_type_tag(movie.get("media_type"))}</div>'
@@ -378,6 +462,9 @@ def _tile_html(movie: dict) -> str:
         f'<div class="cm-tile-sub">{sub}</div>'
         f'</div></div>'
     )
+    if mid:
+        return f'<a class="cm-tile-link" href="?detail={mid}" title="View details">{tile}</a>'
+    return tile
 
 
 def _rail(title: str, movies: list[dict], count: int | None = None) -> None:
@@ -442,13 +529,16 @@ def _fetch_recommendations(user_id: int, n: int) -> list[dict]:
         return []
 
 
-def _post_feedback(action: str, movie_id: int) -> None:
+def _post_feedback(action: str, movie_id: int, value: float | None = None) -> None:
     try:
-        _post("/api/feedback", {
+        body = {
             "user_id": st.session_state.user_id,
             "movie_id": movie_id,
             "action": action,
-        })
+        }
+        if value is not None:
+            body["value"] = float(value)
+        _post("/api/feedback", body)
         st.toast(f"{action.capitalize()} recorded — recommendations updated", icon="✅")
     except requests.RequestException as exc:
         st.error(f"Feedback failed: {exc}")
@@ -477,10 +567,15 @@ def render_card(movie: dict, key: str) -> None:
             f'<span class="cm-score">match {score:.0%}</span>'
         )
 
+    mid = movie.get("movie_id")
+    poster_block = (
+        f'<a class="cm-tile-link" href="?detail={mid}" title="View details">'
+        f'<div class="cm-poster" style="height:300px;">{img}{fallback}{badge}'
+        f'{_type_tag(movie.get("media_type"))}</div></a>'
+    )
     st.markdown(
         f'<div class="cm-tile" style="flex:0 0 100%; width:100%;">'
-        f'<div class="cm-poster" style="height:300px;">{img}{fallback}{badge}'
-        f'{_type_tag(movie.get("media_type"))}</div>'
+        f'{poster_block}'
         f'<div class="cm-tile-body">'
         f'<div class="cm-tile-title" style="min-height:0; -webkit-line-clamp:3; font-size:.95rem;">{title}'
         f'{" · " + str(year) if year else ""}</div>'
@@ -494,7 +589,17 @@ def render_card(movie: dict, key: str) -> None:
         source = "LLM" if why.get("source") == "llm" else "rule-based"
         st.caption(f"🤖 *Why ({source}):* {why.get('text')}")
 
-    mid = movie.get("movie_id")
+    because_of = movie.get("because_of")
+    if because_of:
+        titles = [b.get("title") for b in because_of if b.get("title")]
+        if titles:
+            st.caption(f"🎯 Because you liked: {', '.join(titles[:2])}")
+
+    if mid:
+        if st.button("🎬 Details", key=f"{key}_det", use_container_width=True):
+            st.session_state.detail = int(mid)
+            st.rerun()
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         if st.button("👍", key=f"{key}_like", help="Like"):
@@ -591,7 +696,8 @@ def _hero_html(featured: dict | None) -> str:
         f'<div class="cm-hero-title">{title}</div>'
         f'<div class="cm-hero-sub">{sub}</div>'
         f'{rating_html}'
-        f'<div class="cm-hero-genres"><span class="cm-chip">{_escape(genres)}</span></div>'
+        f'<div class="cm-hero-genres"><span class="cm-chip">{_escape(genres)}</span>'
+        f'<a href="?detail={featured.get("movie_id")}" class="cm-chip">More info →</a></div>'
         f'</div></div>'
     )
 
@@ -599,6 +705,55 @@ def _hero_html(featured: dict | None) -> str:
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
+
+def _surprise_block() -> None:
+    """A one-click personalized pick with a re-roll button."""
+    st.markdown('<div class="cm-rail-title">🎲 Surprise me</div>', unsafe_allow_html=True)
+    sc1, sc2 = st.columns([2, 3])
+    with sc1:
+        if st.button("🎲 Give me a surprise pick", use_container_width=True):
+            with st.spinner("Rolling the dice ..."):
+                try:
+                    st.session_state.surprise = _get(
+                        "/api/surprise", {"user_id": st.session_state.user_id}
+                    )["pick"]
+                except requests.RequestException as exc:
+                    st.error(f"Surprise failed: {exc}")
+    with sc2:
+        st.markdown(
+            '<div class="cm-note" style="margin-top:8px;">One pick, tuned to your taste — '
+            'roll again for a fresh option.</div>',
+            unsafe_allow_html=True,
+        )
+    pick = st.session_state.get("surprise")
+    if pick:
+        col_a, col_b = st.columns([2, 3])
+        with col_a:
+            st.markdown(
+                f'<a class="cm-tile-link" href="?detail={pick.get("movie_id")}" title="View details">'
+                f'{_tile_html(pick)}</a>',
+                unsafe_allow_html=True,
+            )
+        with col_b:
+            why = pick.get("why")
+            if why:
+                st.caption(f"🤖 {why.get('text')}")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("👍 Like", key="surprise_like", use_container_width=True):
+                    _post_feedback("like", pick.get("movie_id"))
+            with c2:
+                if st.button("➕ Watchlist", key="surprise_wl", use_container_width=True):
+                    _post_feedback("watchlist", pick.get("movie_id"))
+            with c3:
+                if st.button("🎲 Roll again", key="surprise_again", use_container_width=True):
+                    with st.spinner("Rolling the dice ..."):
+                        st.session_state.surprise = _get(
+                            "/api/surprise", {"user_id": st.session_state.user_id}
+                        )["pick"]
+                    st.rerun()
+        st.write("")
+
 
 def page_home() -> None:
     popular = _fetch_rail("popularity", "", "movie", "", 20)
@@ -611,6 +766,8 @@ def page_home() -> None:
     _rail("🇮🇳 Indian cinema", _fetch_rail("popularity", "indian", "", "", 20), count=st.session_state.health.get("indian_movies"))
     _rail("⭐ Anime", _fetch_rail("popularity", "anime", "", "", 20), count=st.session_state.health.get("anime"))
     _rail("📺 TV series", _fetch_rail("popularity", "series", "", "", 20), count=st.session_state.health.get("series"))
+
+    _surprise_block()
 
     st.markdown(
         '<div class="cm-stats">'
@@ -751,6 +908,274 @@ def page_tv() -> None:
     _rail("🆕 New", _fetch_rail("new", "series", "", "", 16))
 
 
+def _cast_html(c: dict) -> str:
+    name = c.get("name") or "?"
+    character = c.get("character") or ""
+    c1, c2 = _color_for(name)
+    profile = c.get("profile_url")
+    img = ""
+    if profile:
+        img = (
+            f'<img src="{_escape(profile)}" alt="{_escape(name)}" loading="lazy" '
+            f'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;'
+            f'border-radius:8px;" onerror="this.remove();">'
+        )
+    card = (
+        f'<div class="cm-cast-card">'
+        f'<div style="height:152px;position:relative;border-radius:8px;'
+        f'background:linear-gradient(160deg,{c1},{c2});'
+        f'display:flex;align-items:center;justify-content:center;">'
+        f'<span style="font-size:2.4rem;font-weight:800;color:rgba(255,255,255,.2)">'
+        f'{_escape(name[:1].upper())}</span>{img}</div>'
+        f'<div class="cm-cast-name">{_escape(name)}</div>'
+        f'<div class="cm-cast-char">{_escape(character)}</div>'
+        f'</div>'
+    )
+    if name != "?":
+        return (
+            f'<a href="?person={quote(str(name))}" title="Explore {_escape(name)}" '
+            f'style="text-decoration:none;color:inherit;">{card}</a>'
+        )
+    return card
+
+
+def page_movie_detail(movie_id: int) -> None:
+    st.markdown('<div class="cm-rail-title" style="margin-top:0;">🎬 Movie details</div>', unsafe_allow_html=True)
+    if st.button("← Back to browsing", key="btn_detail_back"):
+        st.session_state.pop("detail", None)
+        st.query_params.clear()
+        st.rerun()
+    try:
+        data = _get(f"/api/movies/{movie_id}/details")
+    except requests.RequestException as exc:
+        st.error(f"Could not load details: {exc}")
+        return
+
+    m = data.get("movie") or {}
+    d = data.get("details") or {}
+    similar = data.get("similar") or []
+
+    title = _escape(m.get("clean_title") or m.get("title") or "Untitled")
+    year = m.get("year")
+    media_type = m.get("media_type", "movie")
+    vote = m.get("vote_average")
+    lang = m.get("language")
+    overview = d.get("overview") or ""
+    tagline = d.get("tagline") or ""
+    runtime = d.get("runtime_min")
+    release_date = d.get("release_date") or ""
+    status = d.get("status") or ""
+    backdrop = d.get("backdrop_url")
+    genres = list(dict.fromkeys(list(d.get("genres") or []) + list(m.get("genres") or [])))
+    director = d.get("director") or []
+    producers = d.get("producers") or []
+    writers = d.get("writers") or []
+    cast = d.get("cast") or []
+    seasons = d.get("seasons")
+    episodes = d.get("episodes")
+
+    img, fallback = _poster_img_html(m, width=500)
+
+    meta_bits = []
+    if year:
+        meta_bits.append(str(year))
+    if runtime:
+        meta_bits.append(f"{int(runtime)} min")
+    if media_type == "series":
+        extra = []
+        if seasons:
+            extra.append(f"{seasons} season{'s' if seasons != 1 else ''}")
+        if episodes:
+            extra.append(f"{episodes} episodes")
+        meta_bits.append("Series" + (f" · {', '.join(extra)}" if extra else ""))
+    if release_date:
+        meta_bits.append(release_date)
+    if status:
+        meta_bits.append(status)
+    if lang:
+        meta_bits.append(_escape(lang))
+
+    rating_html = ""
+    if vote:
+        rating_html = (
+            f'<div class="cm-detail-rating" style="margin-top:.8rem;">'
+            f'<div class="cm-hero-big">★ {vote:.1f}</div>'
+            f'<span class="cm-note">TMDB rating</span></div>'
+        )
+
+    crew_html = ""
+    if director:
+        crew_html += f'<div class="cm-crew"><b>Director</b>: {_person_chips(director)}</div>'
+    if producers:
+        crew_html += f'<div class="cm-crew"><b>Producer</b>: {_person_chips(producers[:5])}</div>'
+    if writers:
+        crew_html += f'<div class="cm-crew"><b>Writer</b>: {_person_chips(writers[:5])}</div>'
+    genre_html = _chips(genres) if genres else ""
+
+    bg_style = f'background-image:url("{_escape(backdrop)}");' if backdrop else ""
+    bg_div = f'<div class="cm-bg" style="{bg_style}"></div>' if backdrop else ""
+    overview_html = overview if overview else "No plot synopsis available for this title yet."
+    tagline_html = f'<div class="cm-tagline">“{_escape(tagline)}”</div>' if tagline else ""
+    crew_genre_html = (
+        f'<div class="cm-crew" style="margin-top:1rem;">{genre_html}</div>' if genre_html else ""
+    )
+    st.markdown(
+        f'<div class="cm-detail-hero">'
+        f'{bg_div}<div class="cm-shade"></div>'
+        f'<div class="cm-detail-poster">{img}{fallback}</div>'
+        f'<div class="cm-detail-body">'
+        f'<div class="cm-detail-title">{title}</div>'
+        f'<div class="cm-detail-meta">{" · ".join(meta_bits)}</div>'
+        f'{rating_html}'
+        f'{tagline_html}'
+        f'<div class="cm-overview">{_escape(overview_html)}</div>'
+        f'{crew_genre_html}'
+        f'{crew_html}'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    watched = movie_id in st.session_state.get("watched_set", set())
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        if st.button("👍 Like", key="dt_like", use_container_width=True):
+            _post_feedback("like", movie_id)
+    with c2:
+        if st.button("➕ Watchlist", key="dt_wl", use_container_width=True):
+            _post_feedback("watchlist", movie_id)
+    with c3:
+        if st.button("👎 Not for me", key="dt_dis", use_container_width=True):
+            _post_feedback("dislike", movie_id)
+    with c4:
+        if st.button(
+            "✓ Watched" if watched else "🫥 Mark watched",
+            key="dt_watched",
+            use_container_width=True,
+        ):
+            _post_feedback("unwatched" if watched else "watched", movie_id)
+
+    st.write("")
+    rc1, rc2 = st.columns([2, 3])
+    with rc1:
+        star_val = st.select_slider(
+            "⭐ Your rating",
+            options=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
+            value=st.session_state.get(f"star_{movie_id}", 3.5),
+            key=f"star_slider_{movie_id}",
+            label_visibility="collapsed",
+        )
+        st.session_state[f"star_{movie_id}"] = star_val
+    with rc2:
+        st.markdown(
+            '<div class="cm-note" style="margin-top:26px;">Slide to your rating, then:'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("💾 Save rating", key=f"dt_rate_{movie_id}", use_container_width=True):
+            _post_feedback("rate", movie_id, value=star_val)
+
+    trailer_url = d.get("trailer_url")
+    homepage = d.get("homepage")
+    imdb_id = d.get("imdb_id")
+    tmdb_id = d.get("tmdb_id")
+    links = []
+    if trailer_url:
+        links.append(("▶ Trailer", trailer_url))
+    if homepage:
+        links.append(("🏠 Official site", homepage))
+    if imdb_id:
+        links.append(("🎥 IMDb", f"https://www.imdb.com/title/{imdb_id}/"))
+    if tmdb_id:
+        kind = "tv" if media_type == "series" else "movie"
+        links.append(("🎬 TMDB", f"https://www.themoviedb.org/{kind}/{tmdb_id}"))
+    if links:
+        st.markdown('<div class="cm-rail-title">🔗 Watch & explore</div>', unsafe_allow_html=True)
+        for l1, l2 in links:
+            st.link_button(l1, l2, use_container_width=True)
+
+    if cast:
+        st.markdown('<div class="cm-rail-title">🎭 Cast</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="cm-cast">{"".join(_cast_html(c) for c in cast)}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if similar:
+        _rail("🎯 More like this", similar)
+
+
+def page_person(name: str) -> None:
+    st.markdown('<div class="cm-rail-title" style="margin-top:0;">🎬 People</div>', unsafe_allow_html=True)
+    back = st.session_state.get("person_back")
+    if back:
+        if st.button("← Back to movie", key="btn_person_back"):
+            st.session_state.pop("person", None)
+            st.session_state["detail"] = int(back)
+            st.query_params.clear()
+            st.rerun()
+    else:
+        if st.button("← Back to browsing", key="btn_person_back2"):
+            st.session_state.pop("person", None)
+            st.query_params.clear()
+            st.rerun()
+
+    with st.spinner(f"Looking up {name} ..."):
+        try:
+            person = _get("/api/people/search", {"q": name})
+        except requests.RequestException as exc:
+            st.error(f"Could not find that person: {exc}")
+            return
+
+    pname = person.get("name") or name
+    profile_url = person.get("profile_url")
+    department = person.get("department") or ""
+    biography = person.get("biography") or ""
+    catalog = person.get("catalog_movies") or []
+    known_works = person.get("known_works") or []
+
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        if profile_url:
+            st.image(profile_url, width=260)
+        else:
+            c1a, c1b = _color_for(pname)
+            st.markdown(
+                f'<div style="height:260px;border-radius:14px;'
+                f'background:linear-gradient(160deg,{c1a},{c1b});'
+                f'display:flex;align-items:center;justify-content:center;">'
+                f'<span style="font-size:6rem;font-weight:800;color:rgba(255,255,255,.25)">'
+                f'{_escape(pname[:1].upper())}</span></div>',
+                unsafe_allow_html=True,
+            )
+    with c2:
+        st.markdown(
+            f'<div class="cm-detail-title">{_escape(pname)}</div>',
+            unsafe_allow_html=True,
+        )
+        if department:
+            st.markdown(
+                f'<div class="cm-detail-meta"><b>{_escape(department)}</b></div>',
+                unsafe_allow_html=True,
+            )
+        bio = biography if biography else "No biography available for this person."
+        st.markdown(f'<div class="cm-overview">{_escape(bio)}</div>', unsafe_allow_html=True)
+
+    if catalog:
+        _rail("🎥 In your catalog", catalog, count=len(catalog))
+        st.markdown('<div class="cm-rail-title">Explore — full grid</div>', unsafe_allow_html=True)
+        render_grid(catalog, "person")
+
+    if known_works and len(known_works) > len(catalog):
+        st.markdown('<div class="cm-rail-title">✨ More from this person</div>', unsafe_allow_html=True)
+        tmdb_to_local = {c.get("tmdb_id"): c.get("movie_id") for c in catalog if c.get("tmdb_id")}
+        tiles = []
+        for k in known_works[:12]:
+            mid = tmdb_to_local.get(k.get("tmdb_id"))
+            tiles.append(_tile_html({**k, "movie_id": mid} if mid else k))
+        if tiles:
+            st.markdown(f'<div class="cm-rail">{"".join(tiles)}</div>', unsafe_allow_html=True)
+
+
 def page_search() -> None:
     st.markdown('<div class="cm-rail-title">🔍 Search the whole catalog</div>', unsafe_allow_html=True)
     query = st.text_input(
@@ -787,6 +1212,34 @@ def page_search() -> None:
         st.markdown(f"**Results for: _{search_query}_**")
     if results:
         render_grid_filtered(results, "search")
+        with st.expander("💬 Refine this search (conversational)", expanded=False):
+            st.caption(
+                "Tell the engine what to add or remove — e.g. add “more like Christopher "
+                "Nolan movies” or remove “no romance”. It re-searches with those "
+                "concepts mixed in."
+            )
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                add_text = st.text_input("➕ Add more like ...", key="refine_add")
+            with rc2:
+                rem_text = st.text_input("➖ Less of ...", key="refine_rem")
+            if st.button("🔁 Refine results", key="btn_refine", use_container_width=True):
+                additions = [t for t in add_text.split(",") if t.strip()]
+                removals = [t for t in rem_text.split(",") if t.strip()]
+                with st.spinner("Nudging the search vector ..."):
+                    try:
+                        st.session_state.search_results = _post(
+                            "/api/search/refine",
+                            {
+                                "seed": search_query,
+                                "additions": additions,
+                                "removals": removals,
+                                "n": 12,
+                            },
+                        )["results"]
+                        st.session_state.refined = True
+                    except requests.RequestException as exc:
+                        st.error(f"Refine failed: {exc}")
     elif not query.strip():
         st.markdown(
             '<div class="cm-empty">Search or tap an explore card to find movies.</div>',
@@ -794,36 +1247,180 @@ def page_search() -> None:
         )
 
 
-def page_profile() -> None:
-    current = st.session_state.get("user", {})
-    name = _escape(current.get("username", "guest"))
-    uid = current.get("user_id", DEFAULT_USER)
+def _auth_card() -> None:
+    """A centered sign-in / sign-up card for the Profile page."""
     st.markdown(
-        f'<div class="cm-rail-title">👤 {name} · user {uid}</div>',
+        '<div class="cm-auth">'
+        '<h3>🔐 Welcome to CineMatch</h3>'
+        '<p>Sign in to save your likes, build a watchlist and get picks that learn from you.</p>'
+        '<p class="cm-auth-who">You are browsing as <b>guest</b>.</p>'
+        '</div>',
         unsafe_allow_html=True,
     )
-    if st.button("👤 Show my profile"):
-        with st.spinner("Loading profile ..."):
+    username = st.text_input(
+        "Username",
+        key="auth_username",
+        placeholder="your name, e.g. aisha",
+        label_visibility="collapsed",
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Sign in", use_container_width=True, key="btn_signin"):
+            if not _sign_in(username):
+                st.error("No account with that name — tap “Sign up” instead.")
+            else:
+                st.rerun()
+    with c2:
+        if st.button("Sign up", use_container_width=True, key="btn_signup"):
+            if not _sign_up(username):
+                st.error("Enter a username first.")
+            else:
+                st.rerun()
+    st.caption("Just type a name and “Sign up” to create an account — no password needed.")
+
+
+def _onboarding_picker() -> None:
+    """First-sign-in flow: pick favorite movies to seed the taste profile."""
+    st.markdown(
+        '<div class="cm-auth">'
+        '<h3>🎉 Welcome aboard!</h3>'
+        '<p>Pick a few movies you already love so CineMatch can tune your picks '
+        'from day one. You can change these anytime.</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    candidates = _fetch_rail("popularity", "", "movie", "", 40)
+    titles = {m["movie_id"]: (m.get("clean_title") or m.get("title")) for m in candidates}
+    options = list(titles.values())
+    picked = st.multiselect(
+        "Your favorites",
+        options,
+        max_selections=10,
+        placeholder="e.g. Inception, Dangal, Spirited Away ...",
+        key="onboard_picks",
+        label_visibility="collapsed",
+    )
+    if st.button("💚 Save my favorites", key="btn_onboard_save", use_container_width=True):
+        picked_ids = [mid for mid, t in titles.items() if t in picked]
+        errors = 0
+        for mid in picked_ids:
             try:
-                profile = _get(f"/api/user/{st.session_state.user_id}/profile")
-            except requests.RequestException as exc:
-                st.error(f"Profile failed: {exc}")
-                return
-        liked = profile.get("liked", [])
-        watchlist = profile.get("watchlist", [])
-        if liked:
-            st.markdown(f"**Top liked ({len(liked)})**")
-            for m in liked[:10]:
-                stars = _stars(m.get("rating", 0.0) / 5.0)
-                line = f"- **{_escape(m.get('title', ''))}** &nbsp;{stars}"
-                if m.get("year"):
-                    line += f"&nbsp;<span class='cm-chip'>{m.get('year')}</span>"
-                st.markdown(line, unsafe_allow_html=True)
+                _post("/api/feedback", {
+                    "user_id": st.session_state.user_id,
+                    "movie_id": mid,
+                    "action": "like",
+                })
+            except requests.RequestException:
+                errors += 1
+        st.session_state["onboarding"] = False
+        st.session_state.pop("onboard_picks", None)
+        if errors:
+            st.warning(f"Saved {len(picked_ids) - errors}/{len(picked_ids)} favorites (some failed).")
         else:
-            st.markdown('<div class="cm-empty">No movie history for this user yet.</div>', unsafe_allow_html=True)
-        if watchlist:
-            st.markdown(f"**Watchlist ({len(watchlist)})**")
-            st.write(", ".join(str(w) for w in watchlist))
+            st.toast(f"Saved {len(picked_ids)} favorites — recommendations are now tuned", icon="🎯")
+        st.rerun()
+
+
+def _library_section(uid: int) -> None:
+    st.markdown('<div class="cm-rail-title">📚 Your library</div>', unsafe_allow_html=True)
+    with st.spinner("Loading your library ..."):
+        try:
+            lib = _get(f"/api/user/{uid}/library")
+        except requests.RequestException as exc:
+            st.error(f"Library failed: {exc}")
+            return
+    liked = lib.get("liked") or []
+    watchlist = lib.get("watchlist") or []
+    watched = lib.get("watched") or []
+    stars = lib.get("stars") or {}
+    st.session_state["watched_set"] = {m.get("movie_id") for m in watched}
+
+    if not (liked or watchlist or watched or stars):
+        st.markdown(
+            '<div class="cm-empty">Your library is empty — 👍 Like, ➕ Watchlist or '
+            '⭐ Rate movies to fill it up.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    if liked:
+        _rail("💚 Liked", liked, count=len(liked))
+    if watchlist:
+        _rail("➕ Watchlist", watchlist, count=len(watchlist))
+    if watched:
+        _rail("✓ Watched", watched, count=len(watched))
+    if stars:
+        st.markdown('<div class="cm-rail-title">⭐ Your ratings</div>', unsafe_allow_html=True)
+        for mid, value in stars.items():
+            mid = int(mid)
+            movie = next((m for m in (liked + watchlist + watched) if m.get("movie_id") == mid), None)
+            title = movie.get("clean_title") or movie.get("title") if movie else f"Movie {mid}"
+            st.markdown(
+                f"- **{_escape(title)}** &nbsp;<span class='cm-stars'>{_stars(value / 5.0)}</span> "
+                f"&nbsp;<span class='cm-score'>{value:.1f}/5</span>",
+                unsafe_allow_html=True,
+            )
+
+
+def page_profile() -> None:
+    current = st.session_state.get("user", {})
+    name = current.get("username", "guest")
+    uid = current.get("user_id", DEFAULT_USER)
+
+    if not name or name == "guest":
+        _auth_card()
+        return
+
+    if st.session_state.get("onboarding"):
+        _onboarding_picker()
+        return
+
+    st.markdown(
+        f'<div class="cm-rail-title">👤 {_escape(name)} · user {uid}</div>',
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        if st.button("🙋 Show my profile", key="btn_show_profile", use_container_width=True):
+            with st.spinner("Loading profile ..."):
+                try:
+                    profile = _get(f"/api/user/{uid}/profile")
+                except requests.RequestException as exc:
+                    st.error(f"Profile failed: {exc}")
+                    return
+            liked = profile.get("liked", [])
+            watchlist = profile.get("watchlist", [])
+            if liked:
+                st.markdown(f"**Top liked ({len(liked)})**")
+                for m in liked[:10]:
+                    stars = _stars(m.get("rating", 0.0) / 5.0)
+                    line = f"- **{_escape(m.get('title', ''))}** &nbsp;{stars}"
+                    if m.get("year"):
+                        line += f"&nbsp;<span class='cm-chip'>{m.get('year')}</span>"
+                    st.markdown(line, unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    '<div class="cm-empty">No movie history for this user yet.</div>',
+                    unsafe_allow_html=True,
+                )
+            if watchlist:
+                st.markdown(f"**Watchlist ({len(watchlist)})**")
+                st.write(", ".join(str(w) for w in watchlist))
+    with c2:
+        if st.button("🚪 Sign out", key="btn_signout", use_container_width=True):
+            st.session_state.user = {"username": "guest", "user_id": DEFAULT_USER}
+            st.session_state.user_id = DEFAULT_USER
+            st.rerun()
+    with c3:
+        st.markdown(
+            f'<div class="cm-note" style="margin-top:8px;">'
+            f'Signed in as **{_escape(name)}** (user {uid}). '
+            f'Your 👍 / 👎 / ➕ / ✓ / ⭐ actions on any movie are saved to this account '
+            f'and shape your “For You” picks.</div>',
+            unsafe_allow_html=True,
+        )
+
+    _library_section(uid)
 
 
 # ---------------------------------------------------------------------------
@@ -876,46 +1473,69 @@ def main() -> None:
     st.set_page_config(page_title="CineMatch AI", page_icon="🎬", layout="wide")
     st.markdown(_CSS, unsafe_allow_html=True)
 
-    st.markdown(
-        '<div class="cm-logo">CineMatch<span>.ai</span></div>'
-        '<div class="cm-tagline">Recommendations, search & ratings for movies, anime, series and Indian cinema</div>',
-        unsafe_allow_html=True,
-    )
-
     st.session_state.setdefault("user_id", DEFAULT_USER)
     st.session_state.setdefault("user", {"username": "guest", "user_id": DEFAULT_USER})
     st.session_state.setdefault("recommendations", [])
     st.session_state.setdefault("query", "")
     st.session_state.setdefault("page", "Home")
 
-    with st.sidebar:
-        st.markdown("### 🔐 Account")
-        with st.expander("Sign in / Sign up", expanded=True):
-            username = st.text_input(
-                "Username",
-                key="auth_username",
-                placeholder="your name",
-                label_visibility="collapsed",
-            )
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Sign in", use_container_width=True, key="btn_signin"):
-                    if not _sign_in(username):
-                        st.error("No account with that name — tap Sign up instead.")
-            with c2:
-                if st.button("Sign up", use_container_width=True, key="btn_signup"):
-                    if not _sign_up(username):
-                        st.error("Enter a username first.")
-        current = st.session_state.get("user", {})
+    # A `?detail=<id>` in the URL (clicking a poster tile) deep-links straight
+    # into the movie detail page; `?person=<name>` opens the people page. In-app
+    # buttons set `session_state.detail` / `session_state.person` directly.
+    qp = st.query_params
+    if qp.get("detail") is not None:
+        val = qp["detail"]
+        if isinstance(val, list):
+            val = val[0] if val else None
+        st.session_state["detail"] = int(val) if str(val).isdigit() else None
+        st.session_state.pop("person", None)
+    if qp.get("person") is not None:
+        val = qp["person"]
+        if isinstance(val, list):
+            val = val[0] if val else None
+        st.session_state["person"] = str(val)
+        # Remember which movie we came from so "← Back" can return to it.
+        if st.session_state.get("detail") is not None:
+            st.session_state["person_back"] = st.session_state["detail"]
+        st.session_state.pop("detail", None)
+
+    hd_logo, hd_acc = st.columns([5, 1], vertical_alignment="center")
+    with hd_logo:
         st.markdown(
-            f"Signed in as **{_escape(current.get('username', 'guest'))}** "
-            f"(user **{current.get('user_id', DEFAULT_USER)}**)",
+            '<div class="cm-logo">CineMatch<span>.ai</span></div>'
+            '<div class="cm-tagline">Recommendations, search & ratings for movies, anime, series and Indian cinema</div>',
             unsafe_allow_html=True,
         )
-        if st.button("Sign out", key="btn_signout"):
-            st.session_state.user = {"username": "guest", "user_id": DEFAULT_USER}
-            st.session_state.user_id = DEFAULT_USER
+    with hd_acc:
+        _acc = st.session_state.get("user", {})
+        _acc_name = _acc.get("username", "guest")
+        _acc_label = f"👤 {_escape(_acc_name)}" if _acc_name != "guest" else "🔐 Sign in"
+        if st.button(_acc_label, key="btn_account", use_container_width=True, help="Manage your account"):
+            st.session_state["nav"] = "Profile"
+            st.session_state.pop("detail", None)
+            st.session_state.pop("person", None)
+            st.query_params.clear()
             st.rerun()
+
+    with st.sidebar:
+        st.markdown("### 🔐 Account")
+        _acc = st.session_state.get("user", {})
+        _acc_name = _acc.get("username", "guest")
+        if _acc_name != "guest":
+            st.markdown(
+                f"Signed in as **{_escape(_acc_name)}** "
+                f"(user **{_acc.get('user_id', DEFAULT_USER)}**)."
+            )
+            if st.button("🚪 Sign out", key="btn_signout_side", use_container_width=True):
+                st.session_state.user = {"username": "guest", "user_id": DEFAULT_USER}
+                st.session_state.user_id = DEFAULT_USER
+                st.rerun()
+            st.caption("Manage likes, watchlist and sign-in in the **Profile** tab.")
+        else:
+            st.markdown(
+                "Browsing as **guest**. Sign in from the **Profile** tab to "
+                "save your likes and get personal picks."
+            )
 
         with st.expander("🎛 Session (demo)", expanded=False):
             st.session_state.user_id = st.number_input(
@@ -979,27 +1599,45 @@ def main() -> None:
         "Navigate",
         ["Home", "For You", "Indian", "Anime", "TV", "Genres", "Search", "Profile"],
         selection_mode="single",
-        default="Home",
         key="nav",
         label_visibility="collapsed",
     )
-    st.session_state.page = page or st.session_state.page
+    prev_page = st.session_state.get("_last_page")
+    st.session_state["_last_page"] = page
+    if page is not None:
+        if page != prev_page:
+            # A nav pill was just clicked — close any open detail / person view.
+            st.session_state.pop("detail", None)
+            st.session_state.pop("person", None)
+            st.query_params.clear()
+        st.session_state.page = page
 
-    if page == "Home":
+    person_name = st.session_state.get("person")
+    if person_name:
+        page_person(str(person_name))
+        return
+
+    detail_id = st.session_state.get("detail")
+    if detail_id is not None:
+        page_movie_detail(int(detail_id))
+        return
+
+    active = page or st.session_state.page or "Home"
+    if active == "Home":
         page_home()
-    elif page == "For You":
+    elif active == "For You":
         page_for_you()
-    elif page == "Indian":
+    elif active == "Indian":
         page_indian()
-    elif page == "Anime":
+    elif active == "Anime":
         page_anime()
-    elif page == "TV":
+    elif active == "TV":
         page_tv()
-    elif page == "Genres":
+    elif active == "Genres":
         page_genres()
-    elif page == "Search":
+    elif active == "Search":
         page_search()
-    elif page == "Profile":
+    elif active == "Profile":
         page_profile()
 
 
