@@ -11,11 +11,15 @@ __pycache__/
 .idea/
 .vscode/
 
-# Regenerated inside the Docker build (see Dockerfile RUN chain)
-data/
+# data/raw and models are regenerated inside the Docker build, but the
+# enriched processed catalog (incl. TMDB poster URLs) is copied in as-is.
+data/*
+!data/processed
+data/processed/*
+!data/processed/movies.parquet
+!data/processed/ratings.parquet
 models_cache/
 qdrant_storage/
-*.parquet
 *.zip
 
 # Secrets / local

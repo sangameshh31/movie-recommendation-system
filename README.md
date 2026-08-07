@@ -27,6 +27,10 @@ Next-gen hybrid movie recommendation engine: **Collaborative Filtering (SVD + it
 - **Vector store:** Qdrant. Runs embedded (zero-setup, persisted in `qdrant_storage/`) by default; point `QDRANT_URL` at `http://localhost:6333` (Docker) for the server mode.
 - **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2` (384-dim).
 - **Feedback loop:** in-memory like/dislike/watchlist signals that re-rank on every request.
+- **Indian cinema:** a curated catalog of **379 films across 8 languages**
+  (Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi) with
+  language-aware embeddings — search *"a Malayalam crime thriller"* or browse
+  trending titles per language.
 
 ## Quickstart
 
@@ -67,7 +71,8 @@ streamlit run frontend/streamlit_app.py
 | --- | --- | --- |
 | GET | `/api/recommend/{user_id}` | Hybrid recommendations for a user |
 | POST | `/api/recommend/query` | Hybrid recs blended with a natural-language query |
-| GET | `/api/movies/search?q=...` | Semantic / natural-language search |
+| GET | `/api/movies/search?q=...` | Semantic / natural-language search (`origin`, `language` filters) |
+| GET | `/api/movies/trending?origin=indian` | Top movies by popularity (Indian cinema rail) |
 | POST | `/api/feedback` | Record `like` / `dislike` / `watchlist` / `remove` |
 | GET | `/api/user/{user_id}/profile` | User's liked movies |
 | GET | `/api/explain/{user_id}/{movie_id}` | "Why you might like this" |
@@ -90,6 +95,7 @@ during `index_vectors.py`).
 ```
 src/cinematch/
 ├── data.py            # MovieLens download / ETL / parquet cache
+├── indian_cinema.py   # curated Indian catalog (379 films) + seeded ratings
 ├── text.py            # movie metadata → embedding text (+ TMDB enrich)
 ├── embeddings.py      # sentence-transformers wrapper
 ├── vector_store.py    # Qdrant wrapper (embedded or remote)
@@ -114,8 +120,8 @@ sampled negatives (random chance **HR@10 = 0.10**). Last run on MovieLens 100k:
 
 | Metric | Result |
 | --- | --- |
-| Hit Rate@10 | **0.381** |
-| Mean Reciprocal Rank | **0.202** |
+| Hit Rate@10 | **0.395** |
+| Mean Reciprocal Rank | **0.216** |
 
 ```
 python scripts/eval.py --topk 10

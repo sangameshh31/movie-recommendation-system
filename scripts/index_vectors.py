@@ -23,8 +23,11 @@ def main():
     data = load_processed(paths=SETTINGS.paths)
     movies = data["movies"]
 
-    fetcher = make_tmdb_fetcher(movies, api_key=SETTINGS.tmdb_api_key)
-    source = "TMDB overviews" if fetcher else "title+genres"
+    # Only fetch TMDB plot overviews when a persisted overview cache already
+    # exists (run scripts/fetch_posters.py --fill-overviews to create one).
+    overview_cache = SETTINGS.paths.processed_dir / "overviews.parquet"
+    fetcher = make_tmdb_fetcher(movies, api_key=SETTINGS.tmdb_api_key) if overview_cache.exists() else None
+    source = "TMDB overviews" if fetcher else "title+genres+language"
     enriched = build_movie_text(movies, fetcher)
     print(f"Embedding {len(enriched):,} movies ({source}) ...")
 

@@ -122,12 +122,22 @@ def ingest(paths: Paths | None = None, size: str | None = None) -> dict[str, pd.
 
 
 def load_processed(paths: Paths | None = None) -> dict[str, pd.DataFrame]:
-    """Load cached parquet frames (calling :func:`ingest` if cache is absent)."""
+    """Load cached parquet frames (calling :func:`ingest` if cache is absent).
+
+    Applies the Indian cinema augmentation so every consumer (train, eval,
+    index, API) sees the combined catalog.
+    """
     paths = paths or Paths()
     movies_path = paths.processed_dir / "movies.parquet"
     ratings_path = paths.processed_dir / "ratings.parquet"
     if not (movies_path.exists() and ratings_path.exists()):
-        return ingest(paths=paths)
-    movies = pd.read_parquet(movies_path)
-    ratings = pd.read_parquet(ratings_path)
+        data = ingest(paths=paths)
+        movies, ratings = data["movies"], data["ratings"]
+    else:
+        movies = pd.read_parquet(movies_path)
+        ratings = pd.read_parquet(ratings_path)
+
+    from cinematch.indian_cinema import apply_indian_augmentation
+
+    movies, ratings = apply_indian_augmentation(movies, ratings, paths.processed_dir)
     return {"movies": movies, "ratings": ratings}

@@ -25,12 +25,11 @@ COPY start.sh ./
 RUN pip install . && chmod +x start.sh
 
 # Bake the whole offline pipeline into the image at build time, so the
-# running container starts instantly with no network or large downloads:
-#   1. MovieLens 100k download + ETL cache
-#   2. SVD collaborative model
-#   3. Item-based CF + semantic embeddings indexed into embedded Qdrant
-RUN python scripts/download_data.py --size 100k \
-    && python scripts/train.py \
+# running container starts instantly with no network or large downloads.
+# The enriched processed catalog (with TMDB poster URLs) is copied in, then
+# the SVD model + semantic vector index are rebuilt inside the image.
+COPY data/processed/movies.parquet data/processed/ratings.parquet ./data/processed/
+RUN python scripts/train.py \
     && python scripts/index_vectors.py
 
 # Streamlit (proxied by Hugging Face Spaces on app_port) + internal FastAPI

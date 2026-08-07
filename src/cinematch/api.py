@@ -38,6 +38,28 @@ async def lifespan(app: FastAPI):
     global service
     print("Loading CineMatch models ...")
     service = RecommenderService(settings=SETTINGS)
+    # Warm the lazy one-time paths (embedded Qdrant init + embedding model) so
+    # the first user request doesn't pay the 2-4s cold-start penalty.
+    try:
+        from cinematch.embeddings import embed_query
+
+        vector = embed_query("warmup")
+        service.content.candidates(vector, top_k=10)
+        service.content.profile_vector([int(service.movies["movie_id"].iloc[0])])
+    except Exception as exc:  # pragma: no cover
+        print(f"Warmup (embedding model) skipped: {exc}")
+    try:
+        # Probe the optional Ollama endpoint once at startup; its first call
+        # can hang for seconds on Windows if the port is firewalled/dropped.
+        from cinematch.explainer import _ollama_available
+
+        _ollama_available()
+    except Exception as exc:  # pragma: no cover
+        print(f"Warmup (ollama probe) skipped: {exc}")
+    try:
+        _ = service.vector_index_ready
+    except Exception as exc:  # pragma: no cover
+        print(f"Warmup (vector index) skipped: {exc}")
     print(
         f"Ready: {len(service.movies):,} movies | "
         f"vectors indexed={service.vector_index_ready}"
@@ -63,11 +85,15 @@ def _require_service() -> RecommenderService:
 @app.get("/health")
 def health():
     svc = service
+    indian = 0
+    if svc is not None and "origin" in svc.movies.columns:
+        indian = int((svc.movies["origin"] == "indian").sum())
     return {
         "status": "ok" if svc is not None else "loading",
         "vector_index": bool(svc and svc.vector_index_ready),
         "svd_ready": bool(svc and svc._svd is not None),
         "movies": len(svc.movies) if svc else 0,
+        "indian_movies": indian,
         "embedding": model_info(),
     }
 
@@ -76,14 +102,31 @@ def health():
 def search_movies(
     q: str = Query(..., min_length=1, description="Natural-language query"),
     n: int = Query(10, ge=1, le=50),
+    origin: str | None = Query(None, description="Filter by catalog origin: movielens | indian"),
+    language: str | None = Query(None, description="Filter by language, e.g. Hindi, Tamil"),
 ):
     """Semantic / natural-language search over the catalog."""
     svc = _require_service()
     try:
-        results = svc.semantic_search(q, n=n)
+        results = svc.semantic_search(q, n=n, origin=origin, language=language)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    return {"query": q, "results": results}
+    return {"query": q, "origin": origin, "language": language, "results": results}
+
+
+@app.get("/api/movies/trending")
+def trending_movies(
+    n: int = Query(12, ge=1, le=50),
+    origin: str | None = Query(None, description="Filter by catalog origin: movielens | indian"),
+    language: str | None = Query(None, description="Filter by language, e.g. Hindi, Tamil"),
+):
+    """Top movies by popularity (Bayesian average over ratings)."""
+    svc = _require_service()
+    return {
+        "origin": origin,
+        "language": language,
+        "results": svc.trending(n=n, origin=origin, language=language),
+    }
 
 
 @app.get("/api/recommend/{user_id}")

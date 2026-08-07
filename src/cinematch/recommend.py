@@ -100,12 +100,23 @@ class RecommenderService:
         return [self._movie_payload(r) for r in df.itertuples(index=False)]
 
     def _movie_payload(self, row) -> dict:
+        poster = getattr(row, "poster_url", None)
+        poster_url = None
+        if (
+            poster is not None
+            and not (isinstance(poster, float) and pd.isna(poster))
+            and str(poster).strip()
+        ):
+            poster_url = str(poster)
         return {
             "movie_id": int(row.movie_id),
             "title": row.title,
             "clean_title": row.clean_title,
             "year": None if pd.isna(row.year) else int(row.year),
             "genres": list(row.genres),
+            "language": str(getattr(row, "language", "") or ""),
+            "origin": str(getattr(row, "origin", "") or ""),
+            "poster_url": poster_url,
         }
 
     # -- user profile --------------------------------------------------------------
@@ -224,6 +235,17 @@ class RecommenderService:
                 "pop": self._popularity.get(mid, 0.0),
             }
 
+        # Diversity injection: let trending Indian blockbusters compete in the
+        # pool so the Indian catalog is visible even without an explicit query.
+        for item in self.trending(origin="indian", n=cfg.n_candidates // 2):
+            mid = item["movie_id"]
+            if mid not in candidates:
+                candidates[mid] = {
+                    "cf": 0.0,
+                    "cb": 0.0,
+                    "pop": item["score"],
+                }
+
         if not candidates:
             # Cold start with no query: fall back to pure popularity.
             ranked = sorted(self._popularity.items(), key=lambda kv: kv[1], reverse=True)[:n]
@@ -246,14 +268,22 @@ class RecommenderService:
         scores = dict(ranked)
         return self._finalize(movie_ids, user_id, with_explanations, scores=scores)
 
-    def semantic_search(self, query: str, n: int = 10) -> list[dict]:
+    def semantic_search(
+        self,
+        query: str,
+        n: int = 10,
+        origin: str | None = None,
+        language: str | None = None,
+    ) -> list[dict]:
         """Natural-language vector search over the movie catalog."""
         if not self.vector_index_ready:
             raise RuntimeError(
                 "Vector index is not built. Run `python scripts/index_vectors.py` first."
             )
         vec = embed_query(query.strip())
-        hits = self.store.search(vec, top_k=n)
+        hits = self.store.search(
+            vec, top_k=n, origin=origin or None, language=language or None
+        )
         return [
             {
                 "movie_id": int(h["movie_id"]),
@@ -261,10 +291,42 @@ class RecommenderService:
                 "clean_title": h["clean_title"],
                 "year": h.get("year"),
                 "genres": h.get("genres", []),
+                "language": h.get("language", ""),
+                "origin": h.get("origin", ""),
+                "poster_url": h.get("poster_url") or None,
                 "similarity": round(float(h["score"]), 4),
             }
             for h in hits
         ]
+
+    def trending(
+        self,
+        n: int = 10,
+        origin: str | None = None,
+        language: str | None = None,
+    ) -> list[dict]:
+        """Top movies by Bayesian-average popularity, optionally filtered.
+
+        Used for the "Trending in Indian cinema" rail and as a diversity
+        injection into the hybrid recommendation pool.
+        """
+        df = self.movies
+        if origin:
+            df = df[df["origin"] == origin]
+        if language:
+            df = df[df["language"] == language]
+        ranked = sorted(
+            df["movie_id"].tolist(),
+            key=lambda mid: self._popularity.get(mid, 0.0),
+            reverse=True,
+        )[:n]
+        out = []
+        for mid in ranked:
+            item = self.get_movie(mid)
+            if item is not None:
+                item["score"] = round(float(self._popularity.get(mid, 0.0)), 4)
+                out.append(item)
+        return out
 
     # -- output ----------------------------------------------------------------------
 

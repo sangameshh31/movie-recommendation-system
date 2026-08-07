@@ -85,10 +85,28 @@
 
 ## Phase 7 — Extras & Optimizations
 
-- [x] `pytest -q` — **8 passed**
+- [x] `pytest -q` — **9 passed**
+- [x] **Indian cinema** — curated catalog of 379 films across 8 languages
+      (Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi)
+      with seeded "critic" ratings; fully searchable, recommendable and
+      trendable via `/api/movies/trending?origin=indian`
+- [x] **UI overhaul** — dark cinematic theme, gradient poster cards, genre
+      chips, star ratings, one-click "Explore" prompts, Indian Cinema tab
+- [x] **Real TMDB posters** — `scripts/fetch_posters.py` fetched posters for
+      **2,040/2,061 movies (99%)** using a free TMDB API key; `poster_url` now
+      flows through vector payloads, recommendations, trending, search and the
+      UI card (gradient fallback if an image is missing). Rebuild with
+      `python scripts/fetch_posters.py` then `python scripts/index_vectors.py --reset`.
+- [x] **UI + API speed fixes** — see Notes:
+      - recommend/health cold-start penalty eliminated (Ollama probe moved to
+        startup + opt-out; Qdrant `count()` cached; retrieval paths warmed)
+      - `localhost` → `127.0.0.1` (Windows `localhost` resolution can stall ~2s/request)
+      - keep-alive `requests.Session` (was a new connection per call)
+      - measured: UI API calls now **4–213 ms** (was ~2,000 ms each)
 - [ ] Qdrant in Docker server mode (`docker compose up` + `QDRANT_URL=http://localhost:6333`)
 - [ ] LLM explanations via Ollama (`ollama pull llama3.2`) — template fallback used until then
-- [ ] TMDB enrichment (set `TMDB_API_KEY`) → real plot overviews, re-run `index_vectors.py`
+- [ ] TMDB plot overviews backfill (`python scripts/fetch_posters.py --fill-overviews`
+      then `python scripts/index_vectors.py --reset`) → richer embeddings
 - [ ] Scale up to MovieLens 1m / 25m (`MOVIELENS_SIZE=1m`)
 - [ ] Tune weights: `SVD_FACTORS`, `WEIGHT_CF`, `WEIGHT_CB`, `WEIGHT_POP`
 
@@ -98,10 +116,10 @@
 > — leave one rating out per user, then rank the positive item against 99 sampled negatives
 > (random chance HR@10 = 0.10). This is the standard protocol used in recommender-systems papers.
 
-| Metric | Target | Achieved (ml-100k) |
+| Metric | Target | Achieved (ml-100k + Indian catalog) |
 | --- | --- | --- |
-| Hit Rate@10 (1 pos + 99 neg) | ≥ 0.40 | **0.381** |
-| MRR | ≥ 0.25 | **0.202** |
+| Hit Rate@10 (1 pos + 99 neg) | ≥ 0.40 | **0.395** |
+| MRR | ≥ 0.25 | **0.216** |
 | Candidate retrieval latency | < 250 ms | ~instant (in-memory SVD + itemCF) |
 | LLM explanation latency | < 1.5 s | template fallback (Ollama not installed) |
 
@@ -111,8 +129,37 @@
 
 **Changes made while completing the project (07 Aug 2026):**
 
+- **Indian cinema catalog (`src/cinematch/indian_cinema.py`):** MovieLens has no
+  Indian films, so we appended 379 hand-curated titles across 8 languages with a
+  `language` + `origin` marker. Synthetic "critic" users seed ratings so the
+  collaborative paths (popularity, item-CF) score them too. Augmentation is
+  idempotent and wired into `load_processed`, so `train`, `index_vectors`,
+  `eval` and the API all see the combined catalog (2,061 movies total).
+- **Language-aware embeddings:** embedding text now includes the film's language
+  ("... :: Tamil film"), so queries like *"a Malayalam crime thriller"* or
+  *"Hindi romantic drama"* match correctly.
+- **New API endpoints:** `GET /api/movies/trending?origin=indian&language=Tamil`
+  and optional `origin`/`language` filters on `GET /api/movies/search`.
+- **UI overhaul:** dark cinematic theme, deterministic gradient poster cards
+  (no image CDN needed), genre/language chips, star ratings, one-click Explore
+  prompts, a dedicated Indian Cinema tab with trending + mood search.
 - **Packaging:** added `pyproject.toml` and ran `pip install -e .` so `cinematch` is importable
   from scripts, tests, uvicorn and streamlit without manual `sys.path` hacks.
+- **Real posters (`scripts/fetch_posters.py`):** one resumable, rate-limited TMDB pass
+  (title+year matching, ~4 req/s) cached `poster_url` for 99% of the catalog. Posters are
+  stored in `data/processed/posters.parquet`, merged into `movies.parquet`, and copied into
+  Qdrant payloads so the UI shows real poster art with a gradient fallback when absent.
+- **Performance fixes (this is why the UI used to feel slow):**
+  - **Ollama probe hang:** the first `explain()` call probed `localhost:11434` and stalled
+    ~4.3 s on Windows (firewalled/dropped port). The probe now returns instantly when
+    `OLLAMA_URL` is empty (opt-out in `.env`) and is otherwise run once at API startup.
+  - **`localhost` vs `127.0.0.1`:** on this Windows machine, resolving `localhost` and the
+    IPv6 loopback fallback adds ~2 s per connection. The UI now calls `127.0.0.1` (instant).
+  - **Stateless `requests.get`:** opened a new TCP connection per call → ~2 s each. The
+    frontend now reuses a keep-alive `requests.Session` with `trust_env=False`.
+  - **Cold-start warmup:** API lifespan warms the embedding model, Qdrant retrieval paths
+    and caches `count()`; first-request latency dropped from ~2–4.5 s to milliseconds.
+  - Result: UI API calls measured at **4–213 ms** end-to-end.
 - **Eval fixes (`scripts/eval.py`):**
   - Fixed a crash in leave-one-out splitting (`group.iloc[keep]` returned a Series → broken DataFrame).
   - Switched to the standard **negative-sampling protocol** (chance HR@10 = 0.10) with a proper

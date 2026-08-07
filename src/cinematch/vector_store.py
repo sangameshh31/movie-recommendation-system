@@ -12,6 +12,8 @@ without a second round-trip to the database.
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pandas as pd
 from qdrant_client import QdrantClient
@@ -28,6 +30,11 @@ class VectorStore:
             self._client = QdrantClient(path=str(SETTINGS.paths.qdrant_dir))
         else:
             self._client = QdrantClient(url=config.url, api_key=config.api_key or None)
+        # The collection is static at runtime, so cache the point count to avoid
+        # re-reading index metadata from disk on every health check / candidate
+        # generation (disk reads are the source of multi-second cold stalls).
+        self._count_cache: int | None = None
+        self._count_cached_at: float = 0.0
 
     # -- collection management ------------------------------------------------
 
@@ -49,9 +56,16 @@ class VectorStore:
                 size=SETTINGS.embedding.dimension, distance=qm.Distance.COSINE
             ),
         )
+        self._count_cache = None
 
     def count(self) -> int:
-        return self._client.count(self.config.collection).count
+        now = time.time()
+        if self._count_cache is not None and now - self._count_cached_at < 60.0:
+            return self._count_cache
+        value = self._client.count(self.config.collection).count
+        self._count_cache = value
+        self._count_cached_at = now
+        return value
 
     # -- indexing --------------------------------------------------------------
 
@@ -60,6 +74,14 @@ class VectorStore:
         self.ensure_collection(vectors.shape[1])
         ids, payloads = [], []
         for row in movies.itertuples(index=False):
+            poster = getattr(row, "poster_url", "")
+            poster_url = (
+                ""
+                if poster is None
+                or (isinstance(poster, float) and pd.isna(poster))
+                or not str(poster).strip()
+                else str(poster)
+            )
             ids.append(int(row.movie_id))
             payloads.append(
                 {
@@ -68,6 +90,9 @@ class VectorStore:
                     "clean_title": row.clean_title,
                     "year": None if pd.isna(row.year) else int(row.year),
                     "genres": list(row.genres),
+                    "language": str(getattr(row, "language", "") or ""),
+                    "origin": str(getattr(row, "origin", "") or ""),
+                    "poster_url": poster_url,
                 }
             )
 
@@ -91,18 +116,30 @@ class VectorStore:
         query_vector: np.ndarray,
         top_k: int = 20,
         exclude_ids: set[int] | None = None,
+        origin: str | None = None,
+        language: str | None = None,
     ) -> list[dict]:
         """Cosine-similarity search. Returns payload dicts with a `score`."""
         flat = np.asarray(query_vector, dtype=np.float32).reshape(-1)
-        qfilter = None
+        must_not: list[qm.FieldCondition] = []
         if exclude_ids:
-            qfilter = qm.Filter(
-                must_not=[
-                    qm.FieldCondition(
-                        key="movie_id", match=qm.MatchAny(any=list(exclude_ids))
-                    )
-                ]
+            must_not.append(
+                qm.FieldCondition(
+                    key="movie_id", match=qm.MatchAny(any=list(exclude_ids))
+                )
             )
+        must: list[qm.FieldCondition] = []
+        if origin:
+            must.append(
+                qm.FieldCondition(key="origin", match=qm.MatchValue(value=origin))
+            )
+        if language:
+            must.append(
+                qm.FieldCondition(key="language", match=qm.MatchValue(value=language))
+            )
+        qfilter = None
+        if must or must_not:
+            qfilter = qm.Filter(must=must or None, must_not=must_not or None)
         hits = self._client.query_points(
             collection_name=self.config.collection,
             query=flat.tolist(),

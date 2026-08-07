@@ -22,6 +22,9 @@ _TEMPLATE = (
 @lru_cache(maxsize=1)
 def _ollama_available() -> bool:
     cfg = SETTINGS.explainer
+    if not cfg.ollama_url.strip():
+        # No Ollama configured (see .env.example): rule-based explanations only.
+        return False
     try:
         resp = httpx.get(f"{cfg.ollama_url.rstrip('/')}/api/tags", timeout=2)
         return resp.status_code == 200
