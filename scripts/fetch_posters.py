@@ -74,6 +74,10 @@ def main() -> None:
         print("No TMDB API key set. Add TMDB_API_KEY to .env or pass --key.")
         return
 
+    from cinematch.tmdb_net import patch_tmdb_dns
+
+    patch_tmdb_dns()
+
     processed_dir = SETTINGS.paths.processed_dir
     data = load_processed(paths=SETTINGS.paths)
     movies = data["movies"].copy()

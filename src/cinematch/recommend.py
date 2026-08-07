@@ -47,6 +47,18 @@ class RecommenderService:
         self._load_or_fit_svd()
         self._itemcf = ItemBasedCF().fit(self.ratings)
         self._popularity = popularity_scores(self.ratings)
+        self._vote_avg: dict[int, float] = {}
+        self._year_of: dict[int, int] = {}
+        if "vote_average" in self.movies.columns:
+            self._vote_avg = {
+                int(r.movie_id): float(r.vote_average)
+                for r in self.movies.itertuples(index=False)
+                if pd.notna(r.vote_average)
+            }
+        self._year_of = {
+            int(r.movie_id): (int(r.year) if pd.notna(r.year) else 0)
+            for r in self.movies.itertuples(index=False)
+        }
         return self
 
     def _load_or_fit_svd(self) -> None:
@@ -108,6 +120,10 @@ class RecommenderService:
             and str(poster).strip()
         ):
             poster_url = str(poster)
+        vote = getattr(row, "vote_average", None)
+        vote_avg = None
+        if vote is not None and pd.notna(vote):
+            vote_avg = round(float(vote), 1)
         return {
             "movie_id": int(row.movie_id),
             "title": row.title,
@@ -116,6 +132,8 @@ class RecommenderService:
             "genres": list(row.genres),
             "language": str(getattr(row, "language", "") or ""),
             "origin": str(getattr(row, "origin", "") or ""),
+            "media_type": str(getattr(row, "media_type", "") or "movie"),
+            "vote_average": vote_avg,
             "poster_url": poster_url,
         }
 
@@ -293,6 +311,8 @@ class RecommenderService:
                 "genres": h.get("genres", []),
                 "language": h.get("language", ""),
                 "origin": h.get("origin", ""),
+                "media_type": h.get("media_type", "movie"),
+                "vote_average": h.get("vote_average"),
                 "poster_url": h.get("poster_url") or None,
                 "similarity": round(float(h["score"]), 4),
             }
@@ -304,22 +324,39 @@ class RecommenderService:
         n: int = 10,
         origin: str | None = None,
         language: str | None = None,
+        media_type: str | None = None,
+        sort_by: str = "popularity",
+        genre: str | None = None,
     ) -> list[dict]:
-        """Top movies by Bayesian-average popularity, optionally filtered.
+        """Top titles by popularity / rating / recency, optionally filtered.
 
-        Used for the "Trending in Indian cinema" rail and as a diversity
-        injection into the hybrid recommendation pool.
+        ``origin`` selects a catalog partition (``indian``, ``anime``,
+        ``series``, ``new``, ``movielens``), ``media_type`` one of
+        ``movie``/``series``, ``sort_by`` one of ``popularity`` / ``rating`` /
+        ``new``, and ``genre`` a single genre to require.
         """
         df = self.movies
         if origin:
             df = df[df["origin"] == origin]
+        if media_type:
+            df = df[df["media_type"] == media_type]
         if language:
             df = df[df["language"] == language]
-        ranked = sorted(
-            df["movie_id"].tolist(),
-            key=lambda mid: self._popularity.get(mid, 0.0),
-            reverse=True,
-        )[:n]
+        if genre:
+            df = df[
+                df["genres"].apply(
+                    lambda g: g is not None and isinstance(g, (list, tuple, np.ndarray)) and genre in g
+                )
+            ]
+
+        if sort_by == "rating":
+            key = lambda mid: (self._vote_avg.get(mid, 0.0), self._popularity.get(mid, 0.0))
+        elif sort_by == "new":
+            key = lambda mid: (self._year_of.get(mid, 0), self._popularity.get(mid, 0.0))
+        else:
+            key = lambda mid: self._popularity.get(mid, 0.0)
+
+        ranked = sorted(df["movie_id"].tolist(), key=key, reverse=True)[:n]
         out = []
         for mid in ranked:
             item = self.get_movie(mid)

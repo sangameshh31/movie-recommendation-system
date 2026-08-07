@@ -27,10 +27,15 @@ Next-gen hybrid movie recommendation engine: **Collaborative Filtering (SVD + it
 - **Vector store:** Qdrant. Runs embedded (zero-setup, persisted in `qdrant_storage/`) by default; point `QDRANT_URL` at `http://localhost:6333` (Docker) for the server mode.
 - **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2` (384-dim).
 - **Feedback loop:** in-memory like/dislike/watchlist signals that re-rank on every request.
-- **Indian cinema:** a curated catalog of **379 films across 8 languages**
-  (Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi) with
-  language-aware embeddings — search *"a Malayalam crime thriller"* or browse
-  trending titles per language.
+- **Indian cinema:** a TMDB-expanded catalog — **2,818 Indian films across 13 languages**
+  (Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi, Gujarati,
+  Assamese, Oriya, Urdu, Bhojpuri — incl. the full Dr. Rajkumar filmography).
+- **Everything else:** **9,561 titles total** — Hollywood + world cinema, **979 anime**
+  (movies + series), **603 TV series** and animation/cartoons, each with a `media_type`
+  and `origin` marker and an IMDb-style rating badge. Language-aware embeddings —
+  search *"a Malayalam crime thriller"*, *"anime adventure"* or *"binge-worthy crime
+  tv series"* — and browse trending titles per rail. Real TMDB poster art with
+  gradient fallback.
 
 ## Quickstart
 
@@ -95,7 +100,9 @@ during `index_vectors.py`).
 ```
 src/cinematch/
 ├── data.py            # MovieLens download / ETL / parquet cache
-├── indian_cinema.py   # curated Indian catalog (379 films) + seeded ratings
+├── indian_cinema.py   # curated Indian catalog + seeded ratings
+├── tmdb_catalog.py    # TMDB catalog augmentation (Indian/anime/series/recent)
+├── tmdb_net.py        # DNS-over-HTTPS fix for TMDB API timeouts
 ├── text.py            # movie metadata → embedding text (+ TMDB enrich)
 ├── embeddings.py      # sentence-transformers wrapper
 ├── vector_store.py    # Qdrant wrapper (embedded or remote)

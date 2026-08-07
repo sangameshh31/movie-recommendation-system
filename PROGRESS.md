@@ -86,17 +86,18 @@
 ## Phase 7 — Extras & Optimizations
 
 - [x] `pytest -q` — **9 passed**
-- [x] **Indian cinema** — curated catalog of 379 films across 8 languages
-      (Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali, Punjabi)
+- [x] **Indian cinema** — curated catalog (**2,818 TMDB Indian films across 13
+      languages** + Dr. Rajkumar filmography, Hindi→Bhojpuri)
       with seeded "critic" ratings; fully searchable, recommendable and
-      trendable via `/api/movies/trending?origin=indian`
-- [x] **UI overhaul** — dark cinematic theme, gradient poster cards, genre
-      chips, star ratings, one-click "Explore" prompts, Indian Cinema tab
-- [x] **Real TMDB posters** — `scripts/fetch_posters.py` fetched posters for
-      **2,040/2,061 movies (99%)** using a free TMDB API key; `poster_url` now
-      flows through vector payloads, recommendations, trending, search and the
-      UI card (gradient fallback if an image is missing). Rebuild with
-      `python scripts/fetch_posters.py` then `python scripts/index_vectors.py --reset`.
+      trendable via `/api/movies/trending?origin=indian&language=Tamil`
+- [x] **Full catalog (9,561 titles)** — Hollywood + world cinema, **anime (979)**,
+      **TV series (603)** and animation/cartoons, each with `media_type` +
+      `origin` markers and IMDb-style `vote_average` badges
+- [x] **IMDb-style UI** — dark theme + gold accent, logo band, pill navigation,
+      Featured hero, horizontal scroll rails (Popular / Top rated / New /
+      Indian / Anime / TV), IMDb rating badges on every poster, explore chips
+- [x] **Real TMDB posters** — poster URLs captured inline from the catalog fetch
+      passes (no separate pass needed); gradient fallback when missing
 - [x] **UI + API speed fixes** — see Notes:
       - recommend/health cold-start penalty eliminated (Ollama probe moved to
         startup + opt-out; Qdrant `count()` cached; retrieval paths warmed)
@@ -118,8 +119,8 @@
 
 | Metric | Target | Achieved (ml-100k + Indian catalog) |
 | --- | --- | --- |
-| Hit Rate@10 (1 pos + 99 neg) | ≥ 0.40 | **0.395** |
-| MRR | ≥ 0.25 | **0.216** |
+| Hit Rate@10 (1 pos + 99 neg) | ≥ 0.40 | **0.415** |
+| MRR | ≥ 0.25 | **0.241** |
 | Candidate retrieval latency | < 250 ms | ~instant (in-memory SVD + itemCF) |
 | LLM explanation latency | < 1.5 s | template fallback (Ollama not installed) |
 
@@ -129,20 +130,64 @@
 
 **Changes made while completing the project (07 Aug 2026):**
 
+- **Catalog scale-up to 9,561 titles (`scripts/fetch_catalog.py` v2 + `scripts/migrate_catalog.py`):**
+  the catalog now covers **Hollywood + world cinema, Indian cinema (13 languages),
+  anime, animation/cartoons and TV series**:
+  - all-time popular movies (150 pages) + top-rated movies + 2024–2026 releases,
+  - **2,818 Indian** titles across 13 languages (Hindi, Tamil, Telugu, Malayalam,
+    Kannada, Marathi, Bengali, Punjabi, Gujarati, Assamese, Oriya, Urdu, Bhojpuri)
+    incl. the Dr. Rajkumar filmography,
+  - **979 anime** titles (Japanese animation movies + series),
+  - **603 TV series** (top-rated + popular),
+  - every row carries `media_type` (`movie`/`series`) + `origin`
+    (`indian`/`anime`/`series`/`new`) and a TMDB `vote_average` (0-10) so the UI
+    can show IMDb-style rating badges and separate rails.
+  - cache `data/processed/tmdb_catalog.parquet` flushes every 200 rows → fully resumable.
+- **IMDb-style UI rewrite (`frontend/streamlit_app.py` v2):** dark IMDb look with the
+  gold `#f5c518` accent — top logo band, pill navigation (Home / For You / Indian /
+  Anime / TV / Search / Profile), a "Featured" hero card, and **horizontal scroll rails**
+  (Popular now, Top rated, New releases, Indian, Anime, TV series) of compact poster
+  tiles with **gold IMDb-style rating badges**, type tags and hover lift. Real search
+  is one click away with explore chips and natural-language queries. All glitter/
+  conic-border effects removed in favour of a clean, professional layout.
+- **Trending API upgrades:** `/api/movies/trending` now supports `sort_by`
+  (`popularity` | `rating` | `new`) and `media_type` filters; `/health` reports
+  `indian_movies`, `anime` and `series` counts; embeddings tag TV series so
+  queries like "anime series" or "crime tv show" match correctly.
+- **TMDB catalog expansion (`scripts/fetch_catalog.py` + `src/cinematch/tmdb_catalog.py`):**
+  the catalog grew from 2,061 → **3,442 movies** via TMDB discover (top 250 per year for
+  2024/2025/2026 incl. 301 releases from 2026, top 60 per Indian language, and the full
+  Dr. Rajkumar filmography from TMDB person 1128070). Final split: **890 Indian** films
+  (Kannada 155, Malayalam 91, Telugu 89, Tamil 82, Hindi 65, Bengali 25, Punjabi 2,
+  Marathi 2) + 2,552 recent/world cinema. Source data cached in
+  `data/processed/tmdb_catalog.parquet` (resumable, deduped by `tmdb_id` + normalized title).
+- **TMDB network fix (`src/cinematch/tmdb_net.py`):** the ISP resolver hands out a dead edge
+  IP for `api.themoviedb.org` (TCP timeout). `patch_tmdb_dns()` resolves the real CloudFront
+  IPs via DNS-over-HTTPS, TCP-preflights them, and pins them through a `socket.getaddrinfo`
+  monkeypatch. All TMDB calls (catalog fetch, poster fetch, text enrich) go through it.
+- **Popularity-aware critic seeding (`tmdb_catalog.seed_movie_ratings`):** seeded ratings for
+  TMDB titles now scale with quality (TMDB vote average) *and* popularity (vote count — how many
+  critics have "seen" each film). Trending is no longer dominated by obscure classics; it now
+  surfaces real hits (e.g. 2026 releases, Gangubai Kathiawadi, Koi... Mil Gaya) alongside
+  Dr. Rajkumar classics. Ratings rebuilt to 140,953; SVD retrained (3,442 movies,
+  explained variance 30.21%); eval improved to **HR@10 0.415 / MRR 0.241**.
 - **Indian cinema catalog (`src/cinematch/indian_cinema.py`):** MovieLens has no
   Indian films, so we appended 379 hand-curated titles across 8 languages with a
-  `language` + `origin` marker. Synthetic "critic" users seed ratings so the
+  `language` + `origin` marker (later expanded to 890 Indian titles via the TMDB
+  augmentation). Synthetic "critic" users seed ratings so the
   collaborative paths (popularity, item-CF) score them too. Augmentation is
   idempotent and wired into `load_processed`, so `train`, `index_vectors`,
-  `eval` and the API all see the combined catalog (2,061 movies total).
+  `eval` and the API all see the combined catalog (3,442 movies total).
 - **Language-aware embeddings:** embedding text now includes the film's language
   ("... :: Tamil film"), so queries like *"a Malayalam crime thriller"* or
   *"Hindi romantic drama"* match correctly.
 - **New API endpoints:** `GET /api/movies/trending?origin=indian&language=Tamil`
   and optional `origin`/`language` filters on `GET /api/movies/search`.
-- **UI overhaul:** dark cinematic theme, deterministic gradient poster cards
+- **UI overhaul:** dark cinematic theme with animated effects (aurora backdrop, shimmer title,
+  twinkling stars, rotating conic-gradient poster borders), deterministic gradient poster cards
   (no image CDN needed), genre/language chips, star ratings, one-click Explore
-  prompts, a dedicated Indian Cinema tab with trending + mood search.
+  prompts, a dedicated Indian Cinema tab with trending + mood search, and a "Filter results"
+  panel (genre / year range / min-match score) on every grid.
 - **Packaging:** added `pyproject.toml` and ran `pip install -e .` so `cinematch` is importable
   from scripts, tests, uvicorn and streamlit without manual `sys.path` hacks.
 - **Real posters (`scripts/fetch_posters.py`):** one resumable, rate-limited TMDB pass

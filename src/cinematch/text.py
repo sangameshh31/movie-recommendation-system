@@ -45,6 +45,12 @@ def _compose(row: pd.Series, genre_str: str, overview_fetcher: _OverviewFetcher 
     if isinstance(language, str) and language.strip():
         base = f"{base} :: {language.strip()} film"
 
+    # TV series get a media-type tag so queries like "anime series" or
+    # "crime tv show" hit the right entries.
+    media_type = row.get("media_type")
+    if isinstance(media_type, str) and media_type.strip() == "series":
+        base = f"{base} :: TV series"
+
     if overview_fetcher is not None:
         overview = overview_fetcher(int(row["movie_id"]))
         if overview:
@@ -74,6 +80,10 @@ def make_tmdb_fetcher(movies: pd.DataFrame, api_key: str = SETTINGS.tmdb_api_key
         return None
 
     import requests
+
+    from cinematch.tmdb_net import patch_tmdb_dns
+
+    patch_tmdb_dns()
 
     titles = {int(row.movie_id): row.clean_title for row in movies.itertuples(index=False)}
     cache_path = SETTINGS.paths.processed_dir / "overviews.parquet"

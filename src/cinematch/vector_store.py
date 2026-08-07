@@ -83,6 +83,7 @@ class VectorStore:
                 else str(poster)
             )
             ids.append(int(row.movie_id))
+            vote = getattr(row, "vote_average", None)
             payloads.append(
                 {
                     "movie_id": int(row.movie_id),
@@ -92,6 +93,12 @@ class VectorStore:
                     "genres": list(row.genres),
                     "language": str(getattr(row, "language", "") or ""),
                     "origin": str(getattr(row, "origin", "") or ""),
+                    "media_type": str(getattr(row, "media_type", "") or "movie"),
+                    "vote_average": (
+                        None
+                        if vote is None or pd.isna(vote)
+                        else round(float(vote), 1)
+                    ),
                     "poster_url": poster_url,
                 }
             )

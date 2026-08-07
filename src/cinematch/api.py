@@ -85,15 +85,19 @@ def _require_service() -> RecommenderService:
 @app.get("/health")
 def health():
     svc = service
-    indian = 0
+    indian = series = anime = 0
     if svc is not None and "origin" in svc.movies.columns:
         indian = int((svc.movies["origin"] == "indian").sum())
+        series = int((svc.movies["origin"] == "series").sum())
+        anime = int((svc.movies["origin"] == "anime").sum())
     return {
         "status": "ok" if svc is not None else "loading",
         "vector_index": bool(svc and svc.vector_index_ready),
         "svd_ready": bool(svc and svc._svd is not None),
         "movies": len(svc.movies) if svc else 0,
         "indian_movies": indian,
+        "series": series,
+        "anime": anime,
         "embedding": model_info(),
     }
 
@@ -117,15 +121,28 @@ def search_movies(
 @app.get("/api/movies/trending")
 def trending_movies(
     n: int = Query(12, ge=1, le=50),
-    origin: str | None = Query(None, description="Filter by catalog origin: movielens | indian"),
+    origin: str | None = Query(None, description="Filter by catalog origin: movielens | indian | anime | series | new"),
     language: str | None = Query(None, description="Filter by language, e.g. Hindi, Tamil"),
+    media_type: str | None = Query(None, description="Filter by media type: movie | series"),
+    sort_by: str = Query("popularity", description="Sort key: popularity | rating | new"),
+    genre: str | None = Query(None, description="Require a genre, e.g. Comedy, Sci-Fi"),
 ):
-    """Top movies by popularity (Bayesian average over ratings)."""
+    """Top titles by popularity / rating / recency, optionally filtered."""
     svc = _require_service()
     return {
         "origin": origin,
         "language": language,
-        "results": svc.trending(n=n, origin=origin, language=language),
+        "media_type": media_type,
+        "sort_by": sort_by,
+        "genre": genre,
+        "results": svc.trending(
+            n=n,
+            origin=origin,
+            language=language,
+            media_type=media_type,
+            sort_by=sort_by,
+            genre=genre,
+        ),
     }
 
 

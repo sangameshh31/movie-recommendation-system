@@ -140,4 +140,8 @@ def load_processed(paths: Paths | None = None) -> dict[str, pd.DataFrame]:
     from cinematch.indian_cinema import apply_indian_augmentation
 
     movies, ratings = apply_indian_augmentation(movies, ratings, paths.processed_dir)
+
+    from cinematch.tmdb_catalog import apply_tmdb_augmentation
+
+    movies, ratings = apply_tmdb_augmentation(movies, ratings, paths.processed_dir)
     return {"movies": movies, "ratings": ratings}
