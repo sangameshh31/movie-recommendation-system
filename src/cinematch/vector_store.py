@@ -16,14 +16,16 @@ import time
 
 import numpy as np
 import pandas as pd
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qm
 
 from cinematch.config import SETTINGS
 
 
 class VectorStore:
     def __init__(self, config=SETTINGS.qdrant):
+        from qdrant_client import QdrantClient
+        from qdrant_client.http import models as qm  # noqa: F401 (import guard)
+
+        self._qm = qm
         self.config = config
         if config.local_mode:
             SETTINGS.paths.qdrant_dir.mkdir(parents=True, exist_ok=True)
@@ -44,16 +46,16 @@ class VectorStore:
         if self.config.collection not in names:
             self._client.create_collection(
                 collection_name=self.config.collection,
-                vectors_config=qm.VectorParams(
-                    size=dimension, distance=qm.Distance.COSINE
+                vectors_config=self._qm.VectorParams(
+                    size=dimension, distance=self._qm.Distance.COSINE
                 ),
             )
 
     def reset(self) -> None:
         self._client.recreate_collection(
             collection_name=self.config.collection,
-            vectors_config=qm.VectorParams(
-                size=SETTINGS.embedding.dimension, distance=qm.Distance.COSINE
+            vectors_config=self._qm.VectorParams(
+                size=SETTINGS.embedding.dimension, distance=self._qm.Distance.COSINE
             ),
         )
         self._count_cache = None
@@ -105,7 +107,7 @@ class VectorStore:
 
         self._client.upsert(
             collection_name=self.config.collection,
-            points=qm.Batch(ids=ids, vectors=vectors.tolist(), payloads=payloads),
+            points=self._qm.Batch(ids=ids, vectors=vectors.tolist(), payloads=payloads),
         )
         return len(ids)
 
@@ -128,25 +130,25 @@ class VectorStore:
     ) -> list[dict]:
         """Cosine-similarity search. Returns payload dicts with a `score`."""
         flat = np.asarray(query_vector, dtype=np.float32).reshape(-1)
-        must_not: list[qm.FieldCondition] = []
+        must_not: list[self._qm.FieldCondition] = []
         if exclude_ids:
             must_not.append(
-                qm.FieldCondition(
-                    key="movie_id", match=qm.MatchAny(any=list(exclude_ids))
+                self._qm.FieldCondition(
+                    key="movie_id", match=self._qm.MatchAny(any=list(exclude_ids))
                 )
             )
-        must: list[qm.FieldCondition] = []
+        must: list[self._qm.FieldCondition] = []
         if origin:
             must.append(
-                qm.FieldCondition(key="origin", match=qm.MatchValue(value=origin))
+                self._qm.FieldCondition(key="origin", match=self._qm.MatchValue(value=origin))
             )
         if language:
             must.append(
-                qm.FieldCondition(key="language", match=qm.MatchValue(value=language))
+                self._qm.FieldCondition(key="language", match=self._qm.MatchValue(value=language))
             )
         qfilter = None
         if must or must_not:
-            qfilter = qm.Filter(must=must or None, must_not=must_not or None)
+            qfilter = self._qm.Filter(must=must or None, must_not=must_not or None)
         hits = self._client.query_points(
             collection_name=self.config.collection,
             query=flat.tolist(),

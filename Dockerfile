@@ -13,8 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (cached layer)
-COPY requirements.txt pyproject.toml README.md ./
-RUN pip install -r requirements.txt
+# requirements-dev.txt = full stack (torch, Qdrant, FastAPI) for the baked
+# pipeline; requirements.txt is the light Streamlit-Cloud runtime.
+COPY requirements.txt requirements-dev.txt pyproject.toml README.md ./
+RUN pip install -r requirements-dev.txt
 
 # Application code
 COPY src ./src

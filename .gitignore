@@ -27,8 +27,12 @@ qdrant_storage/
 # Streamlit
 .streamlit/secrets.toml
 
-# ---- Processed catalog needed for the Docker image build ----
-# Hugging Face builds from the git repo, so the bake inputs must be committed.
+# ---- Baked assets committed on purpose ----
+# HF Docker build + Streamlit Cloud runtime both need these committed inputs.
 !data/processed/movies.parquet
 !data/processed/ratings.parquet
 !data/processed/tmdb_catalog.parquet
+# Precomputed semantic index + SVD used by the 1 GB light runtime.
+!data/processed/light_index.pkl
+!models_cache/
+!models_cache/svd_100k.pkl

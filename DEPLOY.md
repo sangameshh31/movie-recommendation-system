@@ -1,122 +1,83 @@
-# 🚀 Deploying CineMatch AI to Hugging Face Spaces
+# 🚀 Deploying CineMatch AI
 
-Free, permanent hosting (no spin-down) for a live demo of the full stack:
-FastAPI + Streamlit + Qdrant (embedded) in **one Docker container**, with the
-dataset, model, and vectors baked in at build time so the app starts instantly.
-
-> No Docker needed on your machine — Hugging Face builds the image in the cloud.
-> Expected build time: a few minutes (installs torch CPU + downloads the
-> embedding model once, then trains the SVD model and indexes ~9.5k titles).
+Two supported paths. The **recommended free path** is Streamlit Community Cloud:
+the UI runs standalone (engine in-process, no FastAPI/Qdrant server) in a
+"light" mode that fits the 1 GB free tier. A second, full-stack Docker path for
+Hugging Face Spaces requires a paid plan (see below).
 
 ---
 
-## 1. Push the repo to GitHub
+## Option 1 — Streamlit Community Cloud (recommended, free)
 
-A `git` remote already points at
-`https://github.com/sangameshh31/movie-recommendation-system` (branch `master`).
-Commit the latest work and push:
+Streamlit Community Cloud builds from your GitHub repo and runs the app in
+**light mode**: numpy vector search over a precomputed index
+(`data/processed/light_index.pkl`, 9561×384) + ONNX embeddings (`fastembed`).
+No torch, no Qdrant, no separate API server — everything runs in one process.
+
+### 1. Bake the light assets (once)
+
+```powershell
+python scripts/build_light_assets.py
+```
+
+This writes `data/processed/light_index.pkl` (the semantic index) and ensures
+`models_cache/svd_100k.pkl` (the SVD matrix) exists. Both are **committed to
+git** (whitelisted in `.gitignore`) so the cloud runtime never trains or
+re-downloads them.
+
+### 2. Push to GitHub
 
 ```powershell
 git add .
-git commit -m "CineMatch AI: complete hybrid recommender"
+git commit -m "deploy: Streamlit Cloud"
 git push origin master
 ```
 
-The processed catalog **is** committed on purpose (`.gitignore` whitelists
-`data/processed/{movies,ratings,tmdb_catalog}.parquet`) — the Docker build
-copies it in, so no MovieLens/TMDB downloads happen at build time. Everything
-else (`data/`, `.env`, `models_cache/`, `qdrant_storage/`) stays gitignored.
+### 3. Create the app
 
-## 2. Create the Space
+1. Go to https://share.streamlit.io (or the Deploy tab in GitHub) → **Create app**
+2. Repo: `sangameshh31/movie-recommendation-system`, branch `master`
+3. **Main file:** `frontend/streamlit_app.py`
+4. **Python version:** 3.12 (pinned via `runtime.txt`)
+5. Dependencies come from `requirements.txt` (the light runtime)
 
-1. Go to https://huggingface.co/new-space
-2. **Space name:** `cinematch-ai` (anything you like)
-3. **License:** MIT (matches the repo)
-4. **SDK:** `Docker`  ← important
-5. **Hardware:** keep **CPU basic** (free)
-6. Create.
+### 4. Secrets / env (Advanced settings)
 
-## 3. Connect the code
-
-Choose **one** of these:
-
-**Option A — sync from GitHub (easiest)**
-1. In the Space page: `Settings → Repo management → Connect GitHub repo`
-2. Pick your repo and branch (`master`). Every `git push` to GitHub triggers a rebuild.
-
-**Option B — push directly to the Space**
-```powershell
-git remote add hf https://USERNAME:HF_TOKEN@huggingface.co/spaces/USERNAME/cinematch-ai
-git push hf master --force
-```
-Get `HF_TOKEN` from https://huggingface.co/settings/tokens (a "write" token).
-> The Space builds from the tip of its main branch, so push everything including
-> the `Dockerfile`, `start.sh`, `README.md` (with the `sdk: docker` header), the
-> `src/` / `scripts/` / `frontend/` folders, and the three `data/processed/*.parquet`
-> files.
-
-## 4. Set the Space secrets
-
-`Settings → Variables and secrets`:
-
-| Secret | Value | Why |
+| Env var | Value | Why |
 | --- | --- | --- |
-| `TMDB_API_KEY` | your key from https://www.themoviedb.org/settings/api | Enables live trailers, cast/crew, and people search. Without it those pages degrade gracefully. |
-| `DATA_DIR` | `/data` | Points the app at the persistent volume so accounts + feedback survive restarts (enable storage first, step 5). |
+| `CINEMATCH_LIGHT` | `1` | Selects the light engine path (defaults to this only via env; the cloud app sets it). |
+| `TMDB_API_KEY` | your key | Live trailers, cast/crew, people search. Without it those pages degrade gracefully. |
 
-## 5. Enable persistent storage (optional but recommended)
+`requirements.txt` installs `streamlit`, `fastembed`, and friends — the first
+boot downloads the MiniLM ONNX model (~90 MB) from HuggingFace Hub and caches
+it for the life of that deployment.
 
-`Settings → Persistent Storage → Enable` (free tier gives 20GB).
-Combined with `DATA_DIR=/data`, this makes `users.json` (accounts), `feedback.json`
-(likes / dislikes / watchlist / watched / stars) and the detail caches survive
-container restarts and rebuilds.
-
-## 6. Wait for the build
-
-The Space shows `Building` while the Dockerfile runs. It builds in this order:
-
-```
-pip install deps        # torch CPU, fastapi, streamlit, qdrant-client ...
-copy baked catalog      # movies + ratings + tmdb_catalog parquet (~3 MB)
-train SVD model         # on the baked ratings (290k rows)
-index ~9.5k embeddings  # MiniLM-L6-v2 → embedded Qdrant
-start API (:8000)       # internal
-start Streamlit (:7860) # the public port
-```
-
-## 7. Use it
-
-Open **https://USERNAME-cinematch-ai.hf.space**
-
-- Recommendations + "why" explanations (because-of)
-- Natural-language search (`/api/movies/search`)
-- Like / Dislike / Watchlist / Watched / star ratings
-- Live trailers + cast/crew (with `TMDB_API_KEY`)
-- Surprise me, people search, profile library rails
-
-Note: only the Streamlit port is exposed to the internet; the FastAPI backend
-runs on the container-internal port `8000`, which the UI calls directly.
+Note: accounts + feedback are file-backed and ephemeral on Community Cloud
+(no persistent disk). That's the accepted trade-off for the free tier.
 
 ---
 
-## Troubleshooting
+## Option 2 — Hugging Face Spaces Docker (full stack, needs PRO)
+
+The original full-stack deploy (`DEPLOY` docs below this file) runs
+FastAPI + Streamlit + embedded Qdrant in one container with everything baked in.
+Docker Spaces on the **free** tier are PRO-only as of 2026, so this path needs a
+paid plan (or a free-tier upgrade after account maturity/community grant).
+
+If you go this route: the `Dockerfile` installs the full stack via
+`requirements-dev.txt` (torch, qdrant-client, fastapi) and the baked pipeline
+`scripts/train.py && scripts/index_vectors.py` runs at build time. The
+`CINEMATCH_LIGHT` env var must **not** be set there.
+
+---
+
+## Troubleshooting (Streamlit Cloud)
 
 | Symptom | Fix |
 | --- | --- |
-| Build fails on `pip install -r requirements.txt` | Free Space CPU quota can be slow; just retry — layers are cached. |
-| UI loads but search errors | Shouldn't happen (vectors baked in). If seen, check Space logs: `Settings → View logs` for the `index_vectors` RUN output. |
-| "Connection refused" to Ollama | Expected — no Ollama in the container; the rule-based explainer is used automatically. |
-| Trailer / cast pages empty | `TMDB_API_KEY` not set or invalid — set the Space secret and rebuild. |
-| Accounts / feedback reset on restart | Enable Persistent Storage and set `DATA_DIR=/data` (steps 4–5). |
-| Changes not appearing | Rebuilds only trigger on push to the connected branch. `git push` again. |
-
-## Optional: run the same container locally
-
-Install Docker Desktop, then:
-
-```powershell
-docker build -t cinematch .
-docker run -p 7860:7860 cinematch
-```
-
-→ http://localhost:7860 (Streamlit) and http://localhost:8000/docs (API).
+| App logs show module-not-found | `requirements.txt` must be at the repo root; redeploy after pushing a change. |
+| First boot is slow (~90 s) | The ONNX model downloads once per deployment; subsequent reruns use the cache. |
+| Memory >1 GB OOM | Ensure `CINEMATCH_LIGHT=1` is set; it drops torch + Qdrant from the process. |
+| Trailer / cast pages empty | `TMDB_API_KEY` missing/invalid — add it in Advanced settings and redeploy. |
+| Changes not showing | Streamlit rebuilds on every push to the connected branch — push again. |
+| GitHub Actions tries to run | No CI configured; if you add one, build only on `main`/`master` and skip light assets. |

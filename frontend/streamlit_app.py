@@ -480,19 +480,26 @@ def _rail(title: str, movies: list[dict], count: int | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# HTTP helpers (cached)
+# Backend helpers (in-process on Streamlit Cloud; cached so the engine is
+# loaded once per app, not once per rerun)
 # ---------------------------------------------------------------------------
 
+@st.cache_resource(show_spinner=False)
+def _backend() -> "Backend":
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+    from local_backend import Backend
+
+    return Backend()
+
+
 def _get(path: str, params: dict | None = None) -> dict:
-    resp = _http.get(f"{API_URL}{path}", params=params, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    return _backend().get(path, params)
 
 
 def _post(path: str, body: dict) -> dict:
-    resp = _http.post(f"{API_URL}{path}", json=body, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    return _backend().post(path, body)
 
 
 @st.cache_data(ttl=180, show_spinner=False)

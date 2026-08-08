@@ -1,0 +1,10 @@
+# CineMatch AI — full local / API / build environment.
+# Includes the heavy deps (torch via sentence-transformers, Qdrant, FastAPI)
+# that the 1 GB Streamlit Cloud runtime deliberately avoids (see requirements.txt).
+-r requirements.txt
+
+sentence-transformers>=3.0
+qdrant-client>=1.12
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pytest>=8.0

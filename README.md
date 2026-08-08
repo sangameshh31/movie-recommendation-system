@@ -91,6 +91,26 @@ streamlit run frontend/streamlit_app.py
 
 > First run downloads the embedding model (~90 MB) from HuggingFace Hub.
 
+### Deploy free — Streamlit Community Cloud
+
+The UI runs standalone (engine in-process, no FastAPI/Qdrant server) in a
+"light" mode that stays under the 1 GB free tier: numpy vector search over a
+precomputed index (`data/processed/light_index.pkl`) + ONNX embeddings
+(`fastembed`, no torch).
+
+```powershell
+python scripts/build_light_assets.py   # precompute light_index.pkl (once)
+git add .
+git commit -m "deploy: Streamlit Cloud"
+git push origin master
+```
+
+Then at https://share.streamlit.io: **Create app → from GitHub** →
+`sangameshh31/movie-recommendation-system`, main file
+`frontend/streamlit_app.py`, Python 3.12 (`runtime.txt`). Advanced settings:
+env var `CINEMATCH_LIGHT=1`, optional `TMDB_API_KEY` (live trailers/cast).
+Accounts + feedback are ephemeral per deployment (file-backed, not a DB).
+
 ### API endpoints
 
 | Method | Path | Purpose |

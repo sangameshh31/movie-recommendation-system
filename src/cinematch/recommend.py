@@ -7,6 +7,7 @@ pipeline: candidate generation (CF + content paths) then hybrid re-ranking.
 
 from __future__ import annotations
 
+import os
 from typing import Iterable
 
 import numpy as np
@@ -48,7 +49,13 @@ class RecommenderService:
         data = load_processed(paths=self.settings.paths)
         self.movies, self.ratings = data["movies"], data["ratings"]
         self._load_or_fit_svd()
-        self._itemcf = ItemBasedCF().fit(self.ratings)
+        if os.getenv("CINEMATCH_LIGHT") == "1":
+            # 1 GB Streamlit Cloud runtime: item-item similarity is a 9.5k^2
+            # float matrix (~700 MB) and the ICF blend is optional; SVD + content
+            # still drive the hybrid pipeline.
+            self._itemcf = None
+        else:
+            self._itemcf = ItemBasedCF().fit(self.ratings)
         self._popularity = popularity_scores(self.ratings)
         self._vote_avg: dict[int, float] = {}
         self._year_of: dict[int, int] = {}
@@ -82,7 +89,12 @@ class RecommenderService:
     @property
     def store(self) -> VectorStore:
         if self._store is None:
-            self._store = VectorStore(config=self.settings.qdrant)
+            if os.getenv("CINEMATCH_LIGHT") == "1":
+                from cinematch.lite import LightVectorStore
+
+                self._store = LightVectorStore(config=self.settings.qdrant)
+            else:
+                self._store = VectorStore(config=self.settings.qdrant)
             self._content = ContentScorer(self._store)
         return self._store
 
