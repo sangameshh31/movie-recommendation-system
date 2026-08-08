@@ -10,6 +10,8 @@ pinned: false
 
 # 🎬 CineMatch AI
 
+> **Live app:** https://cine-match-ai-01.streamlit.app
+
 Next-gen hybrid movie recommendation engine: **Collaborative Filtering (SVD + item-based CF)** + **semantic content filtering (sentence embeddings)** + **LLM explanations**, wrapped in a FastAPI backend and a Streamlit UI.
 
 ## Architecture
